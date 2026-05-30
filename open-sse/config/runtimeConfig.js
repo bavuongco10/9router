@@ -32,10 +32,16 @@ export const MEMORY_CONFIG = {
 };
 
 // Stream stall timeout: abort if no chunk received within this duration
-export const STREAM_STALL_TIMEOUT_MS = 30 * 1000;
+// Configurable via STREAM_STALL_TIMEOUT_MS env var (milliseconds)
+export const STREAM_STALL_TIMEOUT_MS = parseInt(process.env.STREAM_STALL_TIMEOUT_MS, 10) || 30 * 1000;
 
 // Fetch connect timeout: abort if upstream doesn't return response headers within this duration
-export const FETCH_CONNECT_TIMEOUT_MS = 20 * 1000;
+// Configurable via FETCH_CONNECT_TIMEOUT_MS env var (milliseconds)
+export const FETCH_CONNECT_TIMEOUT_MS = parseInt(process.env.FETCH_CONNECT_TIMEOUT_MS, 10) || 90 * 1000;
+
+// Connect timeout boost specifically for reasoning / thinking models (which can block headers for minutes)
+// Configurable via REASONING_CONNECT_TIMEOUT_MS env var (milliseconds)
+export const REASONING_CONNECT_TIMEOUT_MS = parseInt(process.env.REASONING_CONNECT_TIMEOUT_MS, 10) || 5 * 60 * 1000;
 
 // Default token limits
 export const DEFAULT_MAX_TOKENS = 64000;
