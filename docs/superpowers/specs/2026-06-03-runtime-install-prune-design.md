@@ -217,7 +217,6 @@ Remove the local `ensureRuntimeDir()` and `npmInstall()` implementations. Replac
 
 ```js
 const {
-  getRuntimeDir,
   getRuntimeNodeModules,
   installRuntimePackages,
 } = require("./runtimeInstall");
