@@ -21,7 +21,7 @@ Make lazy runtime installs coexist in the shared runtime directory. Installing o
 
 Replace both `--no-save` installs with normal saved installs. npm will then record each runtime package in `package.json` under `dependencies`, so later installs treat earlier packages as expected project dependencies instead of extraneous packages.
 
-While making that behavioral fix, extract the duplicated runtime-directory and install-wrapper code into a small shared helper. The helper keeps install behavior consistent for both runtime dependencies without changing the public `ensureSqliteRuntime()` or `ensureTrayRuntime()` APIs used by `postinstall.js` and `cli.js`.
+While making that behavioral fix, extract runtime-directory helpers, npm install execution, npm error summarization, and package-specific install logging into `cli/hooks/runtimeInstall.js`. `sqliteRuntime.js` imports those helpers and re-exports the primitives that existing callers already import from `sqliteRuntime.js`. `trayRuntime.js` imports directly from `runtimeInstall.js` for the shared install helper. This avoids a CommonJS circular dependency.
 
 ### Runtime manifest
 
@@ -40,18 +40,15 @@ The design does not require pre-populating `dependencies: {}`. npm creates or up
 
 ### Shared helper
 
-Create `cli/hooks/runtimeInstall.js` with two responsibilities:
+Create `cli/hooks/runtimeInstall.js` with these responsibilities:
 
-1. `ensureRuntimeDir()` creates the shared runtime project directory and minimal `package.json`.
-2. `installRuntimePackages(pkgs, options)` runs `runNpmInstall()` without `--no-save`, logs package-specific failure guidance, and returns a boolean success result.
+1. `getDataDir()`, `getRuntimeDir()`, and `getRuntimeNodeModules()` define the shared user-writable runtime location.
+2. `ensureRuntimeDir()` creates the shared runtime project directory and minimal `package.json`.
+3. `summarizeNpmError(stderr)` keeps the existing short, user-friendly npm failure summaries.
+4. `runNpmInstall({ cwd, pkgs, extraArgs, timeout })` keeps the existing npm invocation wrapper.
+5. `installRuntimePackages(pkgs, options)` runs `runNpmInstall()` without `--no-save`, logs package-specific failure guidance, and returns a boolean success result.
 
-The helper imports existing primitives from `sqliteRuntime.js`:
-
-- `getRuntimeDir()`
-- `runNpmInstall()`
-- `summarizeNpmError()`
-
-`sqliteRuntime.js` keeps exporting those primitives because existing code already imports them from there (`trayRuntime.js` and `cli/src/cli/tray/tray.js`). This avoids a broader module reshuffle.
+`sqliteRuntime.js` will import and re-export `getRuntimeDir()`, `getRuntimeNodeModules()`, `runNpmInstall()`, and `summarizeNpmError()` so existing imports from `sqliteRuntime.js` keep working.
 
 ### Install options
 
@@ -74,9 +71,25 @@ It deliberately does **not** accept the old `optional` flag. That flag only exis
 Add the shared helper:
 
 ```js
+const { spawnSync } = require("child_process");
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
-const { getRuntimeDir, runNpmInstall, summarizeNpmError } = require("./sqliteRuntime");
+
+function getDataDir() {
+  if (process.env.DATA_DIR) return process.env.DATA_DIR;
+  return process.platform === "win32"
+    ? path.join(process.env.APPDATA || os.homedir(), "9router")
+    : path.join(os.homedir(), ".9router");
+}
+
+function getRuntimeDir() {
+  return path.join(getDataDir(), "runtime");
+}
+
+function getRuntimeNodeModules() {
+  return path.join(getRuntimeDir(), "node_modules");
+}
 
 function ensureRuntimeDir() {
   const dir = getRuntimeDir();
@@ -84,7 +97,7 @@ function ensureRuntimeDir() {
 
   const pkgPath = path.join(dir, "package.json");
   if (!fs.existsSync(pkgPath)) {
-    fs.writeFileSync(pkgPath, JSON.stringify({
+    fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({
       name: "9router-runtime",
       version: "1.0.0",
       private: true,
@@ -93,6 +106,32 @@ function ensureRuntimeDir() {
   }
 
   return dir;
+}
+
+function summarizeNpmError(stderr = "") {
+  const text = String(stderr);
+  if (/ENOTFOUND|ETIMEDOUT|EAI_AGAIN|network|getaddrinfo/i.test(text)) return "No internet connection or registry unreachable";
+  if (/EACCES|EPERM|permission denied/i.test(text)) return "Permission denied (check folder permissions)";
+  if (/ENOSPC|no space/i.test(text)) return "Not enough disk space";
+  if (/node-gyp|gyp ERR|python|MSBuild|Visual Studio|Xcode/i.test(text)) return "Missing build tools (Xcode CLT / Python / VS Build Tools)";
+  if (/ETARGET|version.*not found/i.test(text)) return "Package version not found on registry";
+  const m = text.match(/npm ERR! (.+)/);
+  if (m) return m[1].slice(0, 200);
+  const lastLine = text.trim().split(/\r?\n/).filter(Boolean).pop();
+  return lastLine ? lastLine.slice(0, 200) : "Unknown error";
+}
+
+function runNpmInstall({ cwd, pkgs, extraArgs = [], timeout = 180000 }) {
+  const args = ["install", ...pkgs, "--no-audit", "--no-fund", "--prefer-online", ...extraArgs];
+  const npmCmd = process.platform === "win32" ? "npm.cmd" : "npm";
+  const res = spawnSync(npmCmd, args, {
+    cwd,
+    stdio: ["ignore", "pipe", "pipe"],
+    timeout,
+    shell: process.platform === "win32",
+    encoding: "utf8",
+  });
+  return { ok: res.status === 0, code: res.status, stderr: res.stderr || "", stdout: res.stdout || "" };
 }
 
 function installRuntimePackages(pkgs, {
@@ -117,17 +156,35 @@ function installRuntimePackages(pkgs, {
   return res.ok;
 }
 
-module.exports = { ensureRuntimeDir, installRuntimePackages };
+module.exports = {
+  ensureRuntimeDir,
+  getRuntimeDir,
+  getRuntimeNodeModules,
+  installRuntimePackages,
+  runNpmInstall,
+  summarizeNpmError,
+};
 ```
 
-No `extraArgs` are passed. This is the behavior change that prevents pruning.
+No `extraArgs` are passed by `installRuntimePackages()`. This is the behavior change that prevents pruning. `runNpmInstall()` keeps `extraArgs` for backwards-compatible utility behavior, but the runtime callers no longer pass `--no-save`.
 
 #### 2. `cli/hooks/sqliteRuntime.js`
 
-Remove the local `ensureRuntimeDir()` and `npmInstall()` implementations. Import the shared helper near the other requires:
+Remove the local `getDataDir()`, `getRuntimeDir()`, `getRuntimeNodeModules()`, `ensureRuntimeDir()`, `summarizeNpmError()`, `runNpmInstall()`, and `npmInstall()` implementations.
+
+Replace the current imports with:
 
 ```js
-const { ensureRuntimeDir, installRuntimePackages } = require("./runtimeInstall");
+const fs = require("fs");
+const path = require("path");
+const {
+  ensureRuntimeDir,
+  getRuntimeDir,
+  getRuntimeNodeModules,
+  installRuntimePackages,
+  runNpmInstall,
+  summarizeNpmError,
+} = require("./runtimeInstall");
 ```
 
 Update the install call inside `ensureSqliteRuntime()`:
@@ -156,11 +213,14 @@ module.exports = {
 
 #### 3. `cli/hooks/trayRuntime.js`
 
-Remove the local `ensureRuntimeDir()` and `npmInstall()` implementations. Replace its current import from `sqliteRuntime.js` with two focused imports:
+Remove the local `ensureRuntimeDir()` and `npmInstall()` implementations. Replace its current import from `sqliteRuntime.js` with a direct shared-helper import:
 
 ```js
-const { getRuntimeDir, getRuntimeNodeModules } = require("./sqliteRuntime");
-const { installRuntimePackages } = require("./runtimeInstall");
+const {
+  getRuntimeDir,
+  getRuntimeNodeModules,
+  installRuntimePackages,
+} = require("./runtimeInstall");
 ```
 
 Update the install call inside `ensureTrayRuntime()`:
@@ -183,90 +243,18 @@ module.exports = { ensureTrayRuntime };
 
 #### 4. `tests/unit/runtimeInstall.test.js` (new)
 
-Add Vitest coverage for the helper. The test should avoid real npm installs by mocking `runNpmInstall()` and using a temporary `DATA_DIR`:
+Add Vitest coverage for the helper. The tests should avoid real npm installs by prepending a fake npm executable to `PATH` and using a temporary `DATA_DIR`.
 
-```js
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import fs from "fs";
-import os from "os";
-import path from "path";
+The fake npm executable captures its working directory and argv into a JSON file, then exits with the code configured by the test. This verifies the real `runNpmInstall()` wrapper without contacting the network.
 
-const runNpmInstallMock = vi.fn();
-const summarizeNpmErrorMock = vi.fn(() => "mock npm error");
+Key cases:
 
-vi.mock("../../cli/hooks/sqliteRuntime", () => ({
-  getRuntimeDir: () => path.join(process.env.DATA_DIR, "runtime"),
-  runNpmInstall: runNpmInstallMock,
-  summarizeNpmError: summarizeNpmErrorMock,
-}));
+1. `ensureRuntimeDir()` creates the runtime dir and minimal manifest.
+2. `installRuntimePackages()` invokes npm without `--no-save`.
+3. `installRuntimePackages()` forwards package-specific timeout and returns false on install failure.
+4. `sqliteRuntime.js` still re-exports runtime primitives for existing callers.
 
-describe("runtimeInstall", () => {
-  let dataDir;
-
-  beforeEach(() => {
-    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "9router-runtime-install-"));
-    process.env.DATA_DIR = dataDir;
-    runNpmInstallMock.mockReset();
-    summarizeNpmErrorMock.mockClear();
-  });
-
-  afterEach(() => {
-    delete process.env.DATA_DIR;
-    fs.rmSync(dataDir, { recursive: true, force: true });
-    vi.restoreAllMocks();
-  });
-
-  it("creates a minimal runtime package.json", async () => {
-    const { ensureRuntimeDir } = await import("../../cli/hooks/runtimeInstall.js");
-
-    const runtimeDir = ensureRuntimeDir();
-    const pkg = JSON.parse(fs.readFileSync(path.join(runtimeDir, "package.json"), "utf8"));
-
-    expect(pkg).toMatchObject({
-      name: "9router-runtime",
-      version: "1.0.0",
-      private: true,
-    });
-  });
-
-  it("installs runtime packages without --no-save so npm records dependencies", async () => {
-    runNpmInstallMock.mockReturnValue({ ok: true, stderr: "" });
-    const { installRuntimePackages } = await import("../../cli/hooks/runtimeInstall.js");
-
-    const ok = installRuntimePackages(["better-sqlite3@12.6.2"], { silent: true });
-
-    expect(ok).toBe(true);
-    expect(runNpmInstallMock).toHaveBeenCalledWith({
-      cwd: path.join(dataDir, "runtime"),
-      pkgs: ["better-sqlite3@12.6.2"],
-      timeout: 180000,
-    });
-  });
-
-  it("passes package-specific timeout and returns false on install failure", async () => {
-    runNpmInstallMock.mockReturnValue({ ok: false, stderr: "npm ERR! nope" });
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const { installRuntimePackages } = await import("../../cli/hooks/runtimeInstall.js");
-
-    const ok = installRuntimePackages(["systray2@2.1.4"], {
-      timeout: 120000,
-      label: "system tray",
-      failureTitle: "System tray install failed — tray disabled",
-      failureHint: "tray disabled",
-    });
-
-    expect(ok).toBe(false);
-    expect(runNpmInstallMock).toHaveBeenCalledWith({
-      cwd: path.join(dataDir, "runtime"),
-      pkgs: ["systray2@2.1.4"],
-      timeout: 120000,
-    });
-    expect(warnSpy).toHaveBeenCalledWith("⚠️  System tray install failed — tray disabled");
-  });
-});
-```
-
-The important regression assertion is that `runNpmInstall()` receives no `extraArgs: ["--no-save"]`.
+The important regression assertion is that captured npm argv does not include `--no-save`.
 
 ## Out of Scope
 
@@ -275,7 +263,6 @@ The important regression assertion is that `runNpmInstall()` receives no `extraA
 - Changing where the runtime directory lives
 - Changing SQLite fallback behavior when native install fails
 - Changing tray behavior on Windows
-- Migrating all runtime path helpers out of `sqliteRuntime.js`
 - Adding a postinstall self-test that loads both modules after install
 
 ## Backward Compatibility
@@ -283,15 +270,16 @@ The important regression assertion is that `runNpmInstall()` receives no `extraA
 - `ensureSqliteRuntime()` keeps the same public signature and return shape.
 - `ensureTrayRuntime()` keeps the same public signature and return shape.
 - `getRuntimeDir()`, `getRuntimeNodeModules()`, `runNpmInstall()`, and `summarizeNpmError()` stay exported from `sqliteRuntime.js` for existing imports.
+- `runNpmInstall()` keeps the same signature, including `extraArgs`, for any existing direct caller.
 - Existing runtime directories with package.json files continue to work. The next saved install updates the manifest with the installed runtime dependency.
 - Existing runtime directories whose `better-sqlite3` was pruned will recover on the next `ensureSqliteRuntime()` call because it detects the missing module and reinstalls it.
 
 ## Testing Strategy
 
-- **Unit tests** (`tests/unit/runtimeInstall.test.js`): verify runtime package.json creation, saved install invocation without `--no-save`, package-specific timeout forwarding, and failure logging.
-- **Targeted existing behavior check**: run existing SQLite/tray runtime tests if any exist. If no dedicated tests exist, run the new unit test plus the nearest runtime/config test group.
+- **Unit tests** (`tests/unit/runtimeInstall.test.js`): verify runtime package.json creation, saved install invocation without `--no-save`, package-specific timeout forwarding, failure logging, and `sqliteRuntime.js` re-exports.
+- **Targeted existing behavior check**: run the new unit test plus existing SQLite/database runtime-adjacent tests.
 - **No E2E**: change is local to runtime install orchestration and npm invocation arguments. Real package installation is intentionally not exercised in unit tests because it is slow, network-dependent, and platform-sensitive.
 
 ## Open Questions
 
-None. The chosen scope is the pragmatic fix: remove the prune-causing install flag and deduplicate the shared install wrapper, without adding a broader self-test or moving all runtime helpers.
+None. The chosen scope is the pragmatic fix: remove the prune-causing install flag and deduplicate the shared install wrapper, without adding a broader self-test.
