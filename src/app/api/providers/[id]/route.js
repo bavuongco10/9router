@@ -98,6 +98,7 @@ export async function PUT(request, { params }) {
       testStatus,
       lastError,
       lastErrorAt,
+      allowedModels,
       providerSpecificData
     } = body;
 
@@ -126,6 +127,17 @@ export async function PUT(request, { params }) {
     if (testStatus !== undefined) updateData.testStatus = testStatus;
     if (lastError !== undefined) updateData.lastError = lastError;
     if (lastErrorAt !== undefined) updateData.lastErrorAt = lastErrorAt;
+    if (allowedModels !== undefined) {
+      if (!Array.isArray(allowedModels)) {
+        return NextResponse.json({ error: "allowedModels must be an array" }, { status: 400 });
+      }
+      const cleaned = Array.from(new Set(allowedModels.filter((m) => typeof m === "string" && m.trim() !== "")));
+      if (cleaned.length === 0) {
+        updateData.allowedModels = null;
+      } else {
+        updateData.allowedModels = cleaned;
+      }
+    }
 
     if (
       shouldMergeProviderSpecificData(

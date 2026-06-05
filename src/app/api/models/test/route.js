@@ -2,6 +2,12 @@ import { NextResponse } from "next/server";
 import { getApiKeys } from "@/lib/localDb";
 import { UPDATER_CONFIG } from "@/shared/constants/config";
 import { getConsistentMachineId } from "@/shared/utils/machineId";
+import {
+  MODEL_WHITELIST_BYPASS_HEADER,
+  MODEL_WHITELIST_BYPASS_NONCE_HEADER,
+  MODEL_WHITELIST_BYPASS_VALUE,
+  createModelWhitelistBypassNonce,
+} from "@/shared/utils/modelDiagnosticBypass";
 
 const CLI_TOKEN_SALT = "9r-cli-auth";
 
@@ -22,8 +28,11 @@ export async function POST(request) {
 
     const headers = { "Content-Type": "application/json" };
     if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
-    // Bypass dashboardGuard for internal self-call via CLI token (machineId-based)
+    // Bypass dashboardGuard for internal self-call via CLI token (machineId-based).
+    // Model diagnostics check upstream/model capability, not production routing policy.
     headers["x-9r-cli-token"] = await getConsistentMachineId(CLI_TOKEN_SALT);
+    headers[MODEL_WHITELIST_BYPASS_HEADER] = MODEL_WHITELIST_BYPASS_VALUE;
+    headers[MODEL_WHITELIST_BYPASS_NONCE_HEADER] = createModelWhitelistBypassNonce();
 
     const start = Date.now();
 

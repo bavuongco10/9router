@@ -19,6 +19,26 @@ import { detectFormatByEndpoint } from "open-sse/translator/formats.js";
 import * as log from "../utils/logger.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import { getProjectIdForConnection } from "open-sse/services/projectId.js";
+import { getConsistentMachineId } from "@/shared/utils/machineId";
+import {
+  MODEL_WHITELIST_BYPASS_HEADER,
+  MODEL_WHITELIST_BYPASS_NONCE_HEADER,
+  MODEL_WHITELIST_BYPASS_VALUE,
+  consumeModelWhitelistBypassNonce,
+} from "@/shared/utils/modelDiagnosticBypass";
+
+const CLI_TOKEN_HEADER = "x-9r-cli-token";
+const CLI_TOKEN_SALT = "9r-cli-auth";
+
+let cachedCliToken = null;
+async function hasDiagnosticModelTestBypass(request) {
+  if (request?.headers?.get(MODEL_WHITELIST_BYPASS_HEADER) !== MODEL_WHITELIST_BYPASS_VALUE) return false;
+  const hostname = new URL(request.url).hostname;
+  if (hostname !== "127.0.0.1" && hostname !== "localhost" && hostname !== "::1") return false;
+  if (!cachedCliToken) cachedCliToken = await getConsistentMachineId(CLI_TOKEN_SALT);
+  if (request.headers.get(CLI_TOKEN_HEADER) !== cachedCliToken) return false;
+  return consumeModelWhitelistBypassNonce(request.headers.get(MODEL_WHITELIST_BYPASS_NONCE_HEADER));
+}
 
 /**
  * Handle chat completion request
@@ -157,6 +177,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
 
   // Extract userAgent from request
   const userAgent = request?.headers?.get("user-agent") || "";
+  const bypassModelWhitelist = await hasDiagnosticModelTestBypass(request);
 
   // Try with available accounts (fallback on errors)
   const excludeConnectionIds = new Set();
@@ -164,7 +185,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
   let lastStatus = null;
 
   while (true) {
-    const credentials = await getProviderCredentials(provider, excludeConnectionIds, model);
+    const credentials = await getProviderCredentials(provider, excludeConnectionIds, model, { bypassModelWhitelist });
 
     // All accounts unavailable
     if (!credentials || credentials.allRateLimited) {
