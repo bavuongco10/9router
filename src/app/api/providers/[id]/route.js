@@ -5,6 +5,7 @@ import {
   updateProviderConnection,
   deleteProviderConnection,
 } from "@/models";
+import * as log from "@/sse/utils/logger";
 
 function normalizeProxyConfig(body = {}) {
   const hasAnyProxyField =
@@ -78,7 +79,7 @@ export async function GET(request, { params }) {
 
     return NextResponse.json({ connection: result });
   } catch (error) {
-    console.log("Error fetching connection:", error);
+    log.warn("PROVIDERS", "Failed to fetch connection", { error: error?.message });
     return NextResponse.json({ error: "Failed to fetch connection" }, { status: 500 });
   }
 }
@@ -98,6 +99,7 @@ export async function PUT(request, { params }) {
       testStatus,
       lastError,
       lastErrorAt,
+      allowedModels,
       providerSpecificData
     } = body;
 
@@ -126,6 +128,24 @@ export async function PUT(request, { params }) {
     if (testStatus !== undefined) updateData.testStatus = testStatus;
     if (lastError !== undefined) updateData.lastError = lastError;
     if (lastErrorAt !== undefined) updateData.lastErrorAt = lastErrorAt;
+    if (allowedModels !== undefined) {
+      if (!Array.isArray(allowedModels)) {
+        return NextResponse.json({ error: "allowedModels must be an array" }, { status: 400 });
+      }
+      const cleaned = Array.from(
+        new Set(
+          allowedModels
+            .filter((m) => typeof m === "string")
+            .map((m) => m.trim())
+            .filter((m) => m !== "")
+        )
+      );
+      if (cleaned.length === 0) {
+        updateData.allowedModels = null;
+      } else {
+        updateData.allowedModels = cleaned;
+      }
+    }
 
     if (
       shouldMergeProviderSpecificData(
@@ -166,7 +186,7 @@ export async function PUT(request, { params }) {
 
     return NextResponse.json({ connection: result });
   } catch (error) {
-    console.log("Error updating connection:", error);
+    log.warn("PROVIDERS", "Failed to update connection", { error: error?.message });
     return NextResponse.json({ error: "Failed to update connection" }, { status: 500 });
   }
 }
@@ -183,7 +203,7 @@ export async function DELETE(request, { params }) {
 
     return NextResponse.json({ message: "Connection deleted successfully" });
   } catch (error) {
-    console.log("Error deleting connection:", error);
+    log.warn("PROVIDERS", "Failed to delete connection", { error: error?.message });
     return NextResponse.json({ error: "Failed to delete connection" }, { status: 500 });
   }
 }

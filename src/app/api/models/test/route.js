@@ -2,8 +2,15 @@ import { NextResponse } from "next/server";
 import { getApiKeys } from "@/lib/localDb";
 import { UPDATER_CONFIG } from "@/shared/constants/config";
 import { getConsistentMachineId } from "@/shared/utils/machineId";
-
-const CLI_TOKEN_SALT = "9r-cli-auth";
+import * as log from "@/sse/utils/logger";
+import {
+  MODEL_WHITELIST_BYPASS_HEADER,
+  MODEL_WHITELIST_BYPASS_NONCE_HEADER,
+  MODEL_WHITELIST_BYPASS_VALUE,
+  CLI_TOKEN_HEADER,
+  CLI_TOKEN_SALT,
+  createModelWhitelistBypassNonce,
+} from "@/shared/utils/modelDiagnosticBypass";
 
 // POST /api/models/test - Ping a single model via internal completions or embeddings
 export async function POST(request) {
@@ -18,12 +25,17 @@ export async function POST(request) {
     try {
       const keys = await getApiKeys();
       apiKey = keys.find((k) => k.isActive !== false)?.key || null;
-    } catch {}
+    } catch (error) {
+      log.warn("MODEL_TEST", "Failed to load API keys for diagnostic self-call", { error: error?.message });
+    }
 
     const headers = { "Content-Type": "application/json" };
     if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
-    // Bypass dashboardGuard for internal self-call via CLI token (machineId-based)
-    headers["x-9r-cli-token"] = await getConsistentMachineId(CLI_TOKEN_SALT);
+    // Bypass dashboardGuard for internal self-call via CLI token (machineId-based).
+    // Model diagnostics check upstream/model capability, not production routing policy.
+    headers[CLI_TOKEN_HEADER] = await getConsistentMachineId(CLI_TOKEN_SALT);
+    headers[MODEL_WHITELIST_BYPASS_HEADER] = MODEL_WHITELIST_BYPASS_VALUE;
+    headers[MODEL_WHITELIST_BYPASS_NONCE_HEADER] = createModelWhitelistBypassNonce();
 
     const start = Date.now();
 
@@ -38,7 +50,11 @@ export async function POST(request) {
       const latencyMs = Date.now() - start;
       const rawText = await res.text().catch(() => "");
       let parsed = null;
-      try { parsed = rawText ? JSON.parse(rawText) : null; } catch {}
+      try {
+        parsed = rawText ? JSON.parse(rawText) : null;
+      } catch {
+        log.debug("MODEL_TEST", "Non-JSON embeddings response", { status: res.status, length: rawText.length });
+      }
 
       if (!res.ok) {
         const detail = parsed?.error?.message || parsed?.error || rawText;
@@ -69,7 +85,9 @@ export async function POST(request) {
     let parsed = null;
     try {
       parsed = rawText ? JSON.parse(rawText) : null;
-    } catch {}
+    } catch {
+      log.debug("MODEL_TEST", "Non-JSON chat response", { status: res.status, length: rawText.length });
+    }
 
     if (!res.ok) {
       const detail = parsed?.error?.message || parsed?.msg || parsed?.message || parsed?.error || rawText;
@@ -115,6 +133,7 @@ export async function POST(request) {
 
     return NextResponse.json({ ok: true, latencyMs, error: null, status: res.status });
   } catch (err) {
-    return NextResponse.json({ ok: false, error: err.message }, { status: 500 });
+    log.warn("MODEL_TEST", "Diagnostic model test failed", { error: err?.message });
+    return NextResponse.json({ ok: false, error: "Model diagnostic failed" }, { status: 500 });
   }
 }
