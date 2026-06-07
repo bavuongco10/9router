@@ -30,6 +30,20 @@ import {
 const CLI_TOKEN_HEADER = "x-9r-cli-token";
 const CLI_TOKEN_SALT = "9r-cli-auth";
 
+// Internal-only headers used to gate the diagnostic model-test bypass. They must
+// never reach request logging or the upstream provider — strip before forwarding.
+const INTERNAL_BYPASS_HEADERS = new Set([
+  CLI_TOKEN_HEADER,
+  MODEL_WHITELIST_BYPASS_HEADER,
+  MODEL_WHITELIST_BYPASS_NONCE_HEADER,
+]);
+
+function headersWithoutInternalBypass(headers) {
+  return Object.fromEntries(
+    [...headers.entries()].filter(([key]) => !INTERNAL_BYPASS_HEADERS.has(key.toLowerCase()))
+  );
+}
+
 let cachedCliToken = null;
 async function hasDiagnosticModelTestBypass(request) {
   if (request?.headers?.get(MODEL_WHITELIST_BYPASS_HEADER) !== MODEL_WHITELIST_BYPASS_VALUE) return false;
@@ -60,7 +74,7 @@ export async function handleChat(request, clientRawRequest = null) {
     clientRawRequest = {
       endpoint: url.pathname,
       body,
-      headers: Object.fromEntries(request.headers.entries())
+      headers: headersWithoutInternalBypass(request.headers)
     };
   }
   cacheClaudeHeaders(clientRawRequest.headers);

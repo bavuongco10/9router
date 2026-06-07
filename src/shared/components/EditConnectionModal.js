@@ -385,6 +385,7 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
             addedModelValues={allowedModels}
             closeOnSelect={false}
             hideCombos
+            onlyActiveProviders
             activeProviders={activeProviders}
             modelAliases={modelAliases}
             title="Allow Models for this Account"

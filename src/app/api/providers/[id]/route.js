@@ -131,7 +131,7 @@ export async function PUT(request, { params }) {
       if (!Array.isArray(allowedModels)) {
         return NextResponse.json({ error: "allowedModels must be an array" }, { status: 400 });
       }
-      const cleaned = Array.from(new Set(allowedModels.filter((m) => typeof m === "string" && m.trim() !== "")));
+      const cleaned = Array.from(new Set(allowedModels.map((m) => (typeof m === "string" ? m.trim() : "")).filter(Boolean)));
       if (cleaned.length === 0) {
         updateData.allowedModels = null;
       } else {
