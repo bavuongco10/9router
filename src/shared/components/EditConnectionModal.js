@@ -65,8 +65,7 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
     Promise.all([
       fetchAlias,
       fetch("/api/provider-nodes").then((r) => (r.ok ? r.json() : { nodes: [] })).catch(() => ({ nodes: [] })),
-      fetch("/api/models/disabled").then((r) => (r.ok ? r.json() : { disabled: {} })).catch(() => ({ disabled: {} })),
-    ]).then(([aliases, nodesRes, disabledRes]) => {
+    ]).then(([aliases, nodesRes]) => {
       if (cancelled) return;
       setModelAliases(aliases || {});
       const node = (nodesRes.nodes || []).find((n) => n.id === connection.provider);
@@ -80,7 +79,7 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
       ]);
     });
     return () => { cancelled = true; };
-  }, [isOpen, connection?.id]);
+  }, [isOpen, connection?.id, connection?.provider, connection?.providerSpecificData?.prefix]);
 
   const isOAuth = connection?.authType === "oauth";
   const isAzure = connection?.provider === "azure";
@@ -412,6 +411,7 @@ EditConnectionModal.propTypes = {
     authType: PropTypes.string,
     provider: PropTypes.string,
     providerSpecificData: PropTypes.object,
+    allowedModels: PropTypes.arrayOf(PropTypes.string),
   }),
   proxyPools: PropTypes.arrayOf(PropTypes.shape({
     id: PropTypes.string,

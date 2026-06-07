@@ -61,8 +61,8 @@ export default function ModelSelectModal({
   };
 
   useEffect(() => {
-    if (isOpen) fetchCombos();
-  }, [isOpen]);
+    if (isOpen && !hideCombos) fetchCombos();
+  }, [isOpen, hideCombos]);
 
   const fetchProviderNodes = async () => {
     try {
