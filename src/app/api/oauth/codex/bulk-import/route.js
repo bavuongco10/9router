@@ -2,6 +2,51 @@ import { NextResponse } from "next/server";
 import { createProviderConnection } from "@/models";
 import { extractCodexAccountInfo } from "@/lib/oauth/providers";
 
+// Coerce a timestamp-ish value (ISO string, epoch seconds, or epoch ms) to ISO.
+// Returns undefined for empty/unparseable input.
+function toIso(val) {
+  if (val == null || val === "") return undefined;
+  if (typeof val === "number" || (typeof val === "string" && /^\d+$/.test(val.trim()))) {
+    let n = Number(val);
+    if (n > 0 && n < 1e12) n *= 1000; // looks like epoch seconds -> ms
+    const d = new Date(n);
+    return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
+  }
+  const d = new Date(val);
+  return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
+}
+
+// Map the alternate snake_case export format onto the internal camelCase shape.
+// Current camelCase payloads pass through unchanged (their keys hit the default
+// branch). Empty strings are treated as absent so they don't clobber
+// JWT-backfilled values or trip the accessToken validation.
+function normalizeCodexAccount(raw) {
+  const out = {};
+  const psd = {};
+  for (const [key, value] of Object.entries(raw)) {
+    const v = typeof value === "string" && value.trim() === "" ? undefined : value;
+    if (v === undefined) continue;
+    switch (key) {
+      case "access_token": out.accessToken = v; break;
+      case "refresh_token": out.refreshToken = v; break;
+      case "id_token": out.idToken = v; break;
+      case "last_refresh": out.lastRefreshAt = toIso(v); break;
+      case "expired": out.expiresAt = toIso(v); break;
+      case "account_id": psd.chatgptAccountId = v; break;
+      case "oai_password": psd.oaiPassword = v; break;
+      case "outlook_email": psd.outlookEmail = v; break;
+      case "type": break; // provider is forced to "codex" below
+      default: out[key] = v; // pass through camelCase + any unknown keys
+    }
+  }
+  // Fold snake_case extras into providerSpecificData; an explicitly-provided
+  // camelCase providerSpecificData wins on key conflicts.
+  if (Object.keys(psd).length > 0) {
+    out.providerSpecificData = { ...psd, ...(out.providerSpecificData || {}) };
+  }
+  return out;
+}
+
 /**
  * POST /api/oauth/codex/bulk-import
  * Bulk import multiple codex (OAuth) account JSON objects in one call.
@@ -66,8 +111,11 @@ export async function POST(request) {
         authType: _authType,
         createdAt: _createdAt,
         updatedAt: _updatedAt,
-        ...item
+        ...rest
       } = raw;
+
+      // Accept both the camelCase shape and the snake_case export format.
+      const item = normalizeCodexAccount(rest);
 
       if (!item.accessToken || typeof item.accessToken !== "string") {
         throw new Error("Missing accessToken");
