@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  BarChart,
-  Bar,
+  LineChart,
+  Line,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -124,6 +124,8 @@ export default function RequestDetailsTab() {
   const [providers, setProviders] = useState([]);
   const [providerNameCache, setProviderNameCache] = useState(null);
   const [stats, setStats] = useState(null);
+  // Time-bucket granularity for the "Requests Over Time" chart.
+  const [granularity, setGranularity] = useState("day");
   const [filters, setFilters] = useState({
     provider: "",
     startDate: "",
@@ -179,6 +181,7 @@ export default function RequestDetailsTab() {
       if (filters.provider) params.append("provider", filters.provider);
       if (filters.startDate) params.append("startDate", filters.startDate);
       if (filters.endDate) params.append("endDate", filters.endDate);
+      params.append("groupBy", granularity);
 
       const res = await fetch(`/api/usage/request-details/stats?${params}`);
       const data = await res.json();
@@ -186,7 +189,7 @@ export default function RequestDetailsTab() {
     } catch (error) {
       console.error("Failed to fetch request stats:", error);
     }
-  }, [filters.provider, filters.startDate, filters.endDate]);
+  }, [filters.provider, filters.startDate, filters.endDate, granularity]);
 
   useEffect(() => {
     fetchProviders();
@@ -348,14 +351,32 @@ export default function RequestDetailsTab() {
         </div>
 
         <Card className="flex min-w-0 flex-col gap-3 p-3 sm:p-4">
-          <span className="text-text-muted text-xs uppercase font-semibold">Requests Over Time</span>
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-text-muted text-xs uppercase font-semibold">Requests Over Time</span>
+            <select
+              aria-label="Chart granularity"
+              value={granularity}
+              onChange={(e) => setGranularity(e.target.value)}
+              className={cn(
+                "h-8 px-2 rounded-lg border border-black/10 dark:border-white/10 bg-surface",
+                "text-xs text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20",
+                "cursor-pointer"
+              )}
+              style={{ colorScheme: 'auto' }}
+            >
+              <option value="hour">By Hour</option>
+              <option value="day">By Day</option>
+              <option value="week">By Week</option>
+              <option value="month">By Month</option>
+            </select>
+          </div>
           {!stats ? (
             <div className="h-56 flex items-center justify-center text-text-muted text-sm">Loading...</div>
-          ) : !stats.byDay?.length ? (
+          ) : !stats.series?.length ? (
             <div className="h-56 flex items-center justify-center text-text-muted text-sm">No data for the selected filters</div>
           ) : (
             <ResponsiveContainer width="100%" height={240}>
-              <BarChart data={stats.byDay} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+              <LineChart data={stats.series} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.1} />
                 <XAxis
                   dataKey="date"
@@ -363,6 +384,7 @@ export default function RequestDetailsTab() {
                   tickLine={false}
                   axisLine={false}
                   interval="preserveStartEnd"
+                  minTickGap={24}
                 />
                 <YAxis
                   tick={{ fontSize: 10, fill: "currentColor", fillOpacity: 0.5 }}
@@ -380,9 +402,10 @@ export default function RequestDetailsTab() {
                   }}
                 />
                 <Legend wrapperStyle={{ fontSize: "12px" }} />
-                <Bar dataKey="success" name="Success" stackId="requests" fill="#22c55e" radius={[0, 0, 0, 0]} />
-                <Bar dataKey="failed" name="Failed" stackId="requests" fill="#ef4444" radius={[4, 4, 0, 0]} />
-              </BarChart>
+                <Line type="monotone" dataKey="total" name="Total" stroke="#6366f1" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="success" name="Success" stroke="#22c55e" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="failed" name="Failed" stroke="#ef4444" strokeWidth={2} dot={false} />
+              </LineChart>
             </ResponsiveContainer>
           )}
         </Card>

@@ -239,6 +239,19 @@ function rowInputTokens(tokens) {
   return prompt < cache ? cache : prompt;
 }
 
+// SQL expression that buckets the ISO timestamp by the requested granularity.
+// hour/day/month are pure substrings (robust); week uses strftime on a
+// space-separated, millisecond-stripped copy so SQLite parses it reliably.
+function timeBucketExpr(groupBy) {
+  switch (groupBy) {
+    case "hour":  return "substr(timestamp, 1, 13)"; // 2026-06-08T19
+    case "week":  return "strftime('%Y-W%W', replace(substr(timestamp, 1, 19), 'T', ' '))"; // 2026-W23
+    case "month": return "substr(timestamp, 1, 7)";  // 2026-06
+    case "day":
+    default:      return "substr(timestamp, 1, 10)"; // 2026-06-08
+  }
+}
+
 // Aggregated over ALL filtered rows via pure SQL on the summary columns — no
 // JSON parsing, no loading rows into JS, so it scales to unlimited records.
 export async function getRequestDetailsStats(filter = {}) {
@@ -260,8 +273,8 @@ export async function getRequestDetailsStats(filter = {}) {
   const success = totals.success || 0;
   const failed = total - success;
 
-  const byDay = db.all(
-    `SELECT substr(timestamp, 1, 10) AS date,
+  const series = db.all(
+    `SELECT ${timeBucketExpr(filter.groupBy)} AS date,
             COUNT(*) AS total,
             SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) AS success
      FROM requestDetails ${where}
@@ -284,7 +297,8 @@ export async function getRequestDetailsStats(filter = {}) {
     avgLatencyMs: Math.round(totals.avgLatency || 0),
     totalOutputTokens: totals.totalOutputTokens || 0,
     totalInputTokens: totals.totalInputTokens || 0,
-    byDay,
+    groupBy: filter.groupBy || "day",
+    series,
     byProvider,
   };
 }

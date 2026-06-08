@@ -13,6 +13,7 @@ export async function GET(request) {
     const status = searchParams.get("status");
     const startDate = searchParams.get("startDate");
     const endDate = searchParams.get("endDate");
+    const groupBy = searchParams.get("groupBy");
 
     const filter = {};
 
@@ -22,6 +23,7 @@ export async function GET(request) {
     if (status) filter.status = status;
     if (startDate) filter.startDate = startDate;
     if (endDate) filter.endDate = endDate;
+    if (["hour", "day", "week", "month"].includes(groupBy)) filter.groupBy = groupBy;
 
     const result = await getRequestDetailsStats(filter);
 
