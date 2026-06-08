@@ -169,14 +169,16 @@ export default function RequestDetailsTab() {
     }
   }, [pagination.page, pagination.pageSize, filters]);
 
-  // Analytics aggregated over ALL filtered requests (not just the current page).
+  // Analytics aggregated over all requests matching the provider/date filters.
+  // Intentionally ignores the status filter: the cards (Success Rate, Failed)
+  // and the success/failed chart must reflect the whole picture, otherwise
+  // filtering the table to "Failed" would show 0% success and an all-red chart.
   const fetchStats = useCallback(async () => {
     try {
       const params = new URLSearchParams();
       if (filters.provider) params.append("provider", filters.provider);
       if (filters.startDate) params.append("startDate", filters.startDate);
       if (filters.endDate) params.append("endDate", filters.endDate);
-      if (filters.status) params.append("status", filters.status);
 
       const res = await fetch(`/api/usage/request-details/stats?${params}`);
       const data = await res.json();
@@ -184,7 +186,7 @@ export default function RequestDetailsTab() {
     } catch (error) {
       console.error("Failed to fetch request stats:", error);
     }
-  }, [filters]);
+  }, [filters.provider, filters.startDate, filters.endDate]);
 
   useEffect(() => {
     fetchProviders();
