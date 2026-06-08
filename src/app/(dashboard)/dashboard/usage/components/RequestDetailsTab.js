@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import Card from "@/shared/components/Card";
 import Button from "@/shared/components/Button";
+import Badge from "@/shared/components/Badge";
 import Drawer from "@/shared/components/Drawer";
 import Pagination from "@/shared/components/Pagination";
 import { cn } from "@/shared/utils/cn";
@@ -168,6 +169,28 @@ export default function RequestDetailsTab() {
     setFilters({ provider: "", startDate: "", endDate: "" });
   };
 
+  // Analytics over the currently loaded page of requests.
+  const analytics = useMemo(() => {
+    const total = details.length;
+    const success = details.filter((d) => d.status === "success").length;
+    const failed = total - success;
+    const successRate = total ? Math.round((success / total) * 100) : 0;
+
+    const latencies = details
+      .map((d) => d.latency?.total)
+      .filter((v) => typeof v === "number" && v > 0);
+    const avgLatency = latencies.length
+      ? Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length)
+      : 0;
+
+    const totalOutputTokens = details.reduce(
+      (sum, d) => sum + (d.tokens?.completion_tokens || 0),
+      0
+    );
+
+    return { total, success, failed, successRate, avgLatency, totalOutputTokens };
+  }, [details]);
+
   return (
     <div className="flex min-w-0 flex-col gap-6">
       <Card padding="md">
@@ -236,6 +259,30 @@ export default function RequestDetailsTab() {
         </div>
       </Card>
 
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <Card className="flex min-w-0 flex-col gap-1 px-4 py-3">
+          <span className="text-text-muted text-xs uppercase font-semibold">Total Requests</span>
+          <span className="truncate text-2xl font-bold text-text-main">{analytics.total.toLocaleString()}</span>
+        </Card>
+        <Card className="flex min-w-0 flex-col gap-1 px-4 py-3">
+          <span className="text-text-muted text-xs uppercase font-semibold">Success Rate</span>
+          <span className="flex items-baseline gap-2 truncate text-2xl font-bold text-text-main">
+            {analytics.successRate}%
+            <Badge variant={analytics.failed === 0 ? "success" : "warning"} size="sm">
+              {analytics.success}/{analytics.total}
+            </Badge>
+          </span>
+        </Card>
+        <Card className="flex min-w-0 flex-col gap-1 px-4 py-3">
+          <span className="text-text-muted text-xs uppercase font-semibold">Failed</span>
+          <span className="truncate text-2xl font-bold text-red-600 dark:text-red-400">{analytics.failed.toLocaleString()}</span>
+        </Card>
+        <Card className="flex min-w-0 flex-col gap-1 px-4 py-3">
+          <span className="text-text-muted text-xs uppercase font-semibold">Avg Latency</span>
+          <span className="truncate text-2xl font-bold text-text-main">{analytics.avgLatency.toLocaleString()}ms</span>
+        </Card>
+      </div>
+
       <Card padding="none">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[880px]">
@@ -246,14 +293,15 @@ export default function RequestDetailsTab() {
                 <th className="text-left p-4 text-sm font-semibold text-text-main">Provider</th>
                 <th className="text-right p-4 text-sm font-semibold text-text-main">Input Tokens</th>
                 <th className="text-right p-4 text-sm font-semibold text-text-main">Output Tokens</th>
-                <th className="text-left p-4 text-sm font-semibold text-text-main">Latency</th>
-                <th className="text-center p-4 text-sm font-semibold text-text-main">Action</th>
+              <th className="text-left p-4 text-sm font-semibold text-text-main">Latency</th>
+                <th className="text-center p-4 text-sm font-semibold text-text-main">Status</th>
+            <th className="text-center p-4 text-sm font-semibold text-text-main">Action</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan="7" className="p-8 text-center text-text-muted">
+                  <td colSpan="8" className="p-8 text-center text-text-muted">
                     <div className="flex items-center justify-center gap-2">
                       <span className="material-symbols-outlined animate-spin text-[20px]">progress_activity</span>
                       Loading...
@@ -262,7 +310,7 @@ export default function RequestDetailsTab() {
                 </tr>
               ) : details.length === 0 ? (
                 <tr>
-                  <td colSpan="7" className="p-8 text-center text-text-muted">
+                  <td colSpan="8" className="p-8 text-center text-text-muted">
                     No request details found
                   </td>
                 </tr>
@@ -294,6 +342,15 @@ export default function RequestDetailsTab() {
                         <div>TTFT: <span className="font-mono">{detail.latency?.ttft || 0}ms</span></div>
                         <div>Total: <span className="font-mono">{detail.latency?.total || 0}ms</span></div>
                       </div>
+                    </td>
+                    <td className="p-4 text-center">
+                      <Badge
+                        variant={detail.status === "success" ? "success" : "error"}
+                        size="sm"
+                        dot
+                      >
+                        {detail.status === "success" ? "Success" : "Failed"}
+                      </Badge>
                     </td>
                     <td className="p-4 text-center">
                       <Button
