@@ -73,3 +73,9 @@ export async function validateApiKey(key) {
   if (!row) return false;
   return row.isActive === 1 || row.isActive === true;
 }
+
+export async function getApiKeyByKey(key) {
+  const db = await getAdapter();
+  const row = db.get(`SELECT * FROM apiKeys WHERE key = ?`, [key]);
+  return rowToKey(row);
+}

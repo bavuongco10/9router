@@ -5,8 +5,10 @@ import {
   isAnthropicCompatibleProvider,
   isOpenAICompatibleProvider,
 } from "@/shared/constants/providers";
-import { getProviderConnections, getCombos, getCustomModels, getModelAliases } from "@/lib/localDb";
+import { getProviderConnections, getCombos, getCustomModels, getModelAliases, getApiKeyByKey, getRule, getSettings } from "@/lib/localDb";
 import { getDisabledModels } from "@/lib/disabledModelsDb";
+import { extractApiKey } from "@/sse/services/auth.js";
+import { filterModelsForRule } from "@/lib/access/ruleEval";
 import { resolveKiroModels } from "open-sse/services/kiroModels.js";
 import { resolveQoderModels } from "open-sse/services/qoderModels.js";
 
@@ -430,10 +432,11 @@ export async function OPTIONS() {
  * GET /v1/models - OpenAI compatible models list (LLM/chat models only by default).
  * For other capabilities use /v1/models/{kind} (image, tts, stt, embedding, image-to-text, web).
  */
-export async function GET() {
+export async function GET(request) {
   try {
     const data = await buildModelsList([LLM_KIND]);
-    return Response.json({ object: "list", data }, {
+    const out = await applyRuleFilter(request, data);
+    return Response.json({ object: "list", data: out }, {
       headers: { "Access-Control-Allow-Origin": "*" },
     });
   } catch (error) {
@@ -443,4 +446,23 @@ export async function GET() {
       { status: 500 }
     );
   }
+}
+
+// Per-API-key rule filter shared by /v1/models and /v1/models/[kind].
+// - Known key  → filterModelsForRule (default-deny: empty array if no rule).
+// - No key + requireApiKey on → empty list.
+// - No key + requireApiKey off → unfiltered (preserves local UX).
+export async function applyRuleFilter(request, data) {
+  const apiKey = extractApiKey(request);
+  if (apiKey) {
+    const rec = await getApiKeyByKey(apiKey);
+    if (rec) {
+      const rule = await getRule(rec.id);
+      const combos = await getCombos();
+      return filterModelsForRule(data, rule, combos);
+    }
+  }
+  const settings = await getSettings();
+  if (settings.requireApiKey) return [];
+  return data;
 }

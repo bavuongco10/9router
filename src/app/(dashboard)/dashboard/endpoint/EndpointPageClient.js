@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import PropTypes from "prop-types";
-import { Card, Button, Input, Modal, CardSkeleton, Toggle, ConfirmModal } from "@/shared/components";
+import { Card, Button, Input, Modal, CardSkeleton, Toggle, ConfirmModal, Badge, RuleConfigModal } from "@/shared/components";
+import { AI_PROVIDERS } from "@/shared/constants/providers";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { getCurrentLocale, onLocaleChange } from "@/i18n/runtime";
 
@@ -63,6 +64,15 @@ const CAVEMAN_LEVELS = [
 ];
 export default function APIPageClient({ machineId }) {
   const [keys, setKeys] = useState([]);
+  // Per-key access rules (loaded from /api/rules) + options for the config modal.
+  const [keyRules, setKeyRules] = useState({}); // { [keyId]: { rule, status, grantCounts } }
+  const [ruleOptions, setRuleOptions] = useState(null);
+  const [editingRuleKey, setEditingRuleKey] = useState(null);
+  // Live "what does THIS key see" check: actually calls /v1/models with the
+  // key as Authorization, so the user can verify the rule end-to-end without
+  // leaving the dashboard. { id, name } when open; null when closed.
+  const [checkingModelsKey, setCheckingModelsKey] = useState(null);
+  const [checkModelsResult, setCheckModelsResult] = useState(null); // {loading|models|error}
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
   const [newKeyName, setNewKeyName] = useState("");
@@ -365,6 +375,56 @@ export default function APIPageClient({ machineId }) {
       const keysData = await keysRes.json();
       if (keysRes.ok) {
         setKeys(keysData.keys || []);
+      }
+      // Load per-key rules + the option lists used by the config modal.
+      // Failures here must not block the rest of the page.
+      try {
+        const [rulesRes, providersRes, modelsRes, combosRes] = await Promise.all([
+          fetch("/api/rules"),
+          fetch("/api/providers"),
+          fetch("/api/admin/models"),
+          fetch("/api/combos"),
+        ]);
+        if (rulesRes.ok) {
+          const rulesData = await rulesRes.json();
+          const map = {};
+          for (const r of rulesData.rules || []) {
+            map[r.id] = { rule: r.rule, status: r.status, grantCounts: r.grantCounts };
+          }
+          setKeyRules(map);
+        }
+        if (providersRes.ok && modelsRes.ok && combosRes.ok) {
+          const [providersData, modelsData, combosData] = await Promise.all([
+            providersRes.json(), modelsRes.json(), combosRes.json(),
+          ]);
+          const conns = providersData.connections || [];
+          const providerIds = [...new Set(conns.map((c) => c.provider))].filter(Boolean);
+          const providerNameMap = {};
+          const providerList = providerIds.map((id) => {
+            const meta = AI_PROVIDERS[id];
+            const name = meta?.name || id;
+            providerNameMap[id] = name;
+            return { id, name };
+          });
+          const connectionsByProvider = {};
+          for (const c of conns) {
+            if (!connectionsByProvider[c.provider]) connectionsByProvider[c.provider] = [];
+            connectionsByProvider[c.provider].push({ id: c.id, name: c.name || c.id });
+          }
+          const allModels = (modelsData.data || [])
+            .filter((m) => m && m.id && m.owned_by !== "combo")
+            .map((m) => ({ id: m.id }));
+          const combos = (combosData.combos || []).map((c) => ({ name: c.name }));
+          setRuleOptions({
+            providers: providerList,
+            providerNameMap,
+            connectionsByProvider,
+            models: allModels,
+            combos,
+          });
+        }
+      } catch (err) {
+        console.log("Error fetching rules/options:", err);
       }
     } catch (error) {
       console.log("Error fetching data:", error);
@@ -732,6 +792,34 @@ export default function APIPageClient({ machineId }) {
       }
     } catch (error) {
       console.log("Error creating key:", error);
+    }
+  };
+
+  // Live "what does THIS key see?" probe. Calls the live /v1/models endpoint
+  // with the key as Authorization so the result reflects the actual filter
+  // pipeline (key lookup → rule → filterModelsForRule). Mirrors what an
+  // external tool would see, so users can verify the rule end-to-end without
+  // leaving the dashboard.
+  const handleCheckModels = async (key) => {
+    setCheckingModelsKey({ id: key.id, name: key.name });
+    setCheckModelsResult({ loading: true });
+    try {
+      const t0 = performance.now();
+      const res = await fetch("/v1/models", {
+        headers: { Authorization: `Bearer ${key.key}` },
+      });
+      const ms = Math.round(performance.now() - t0);
+      const text = await res.text();
+      let parsed = null;
+      try { parsed = JSON.parse(text); } catch { /* keep raw text */ }
+      if (!res.ok) {
+        setCheckModelsResult({ error: parsed?.error?.message || text || `HTTP ${res.status}`, status: res.status, ms });
+        return;
+      }
+      const models = (parsed?.data || []).map((m) => m.id);
+      setCheckModelsResult({ models, status: res.status, ms });
+    } catch (err) {
+      setCheckModelsResult({ error: err?.message || "Request failed" });
     }
   };
 
@@ -1212,6 +1300,11 @@ export default function APIPageClient({ machineId }) {
                   {key.isActive === false && (
                     <p className="text-xs text-orange-500 mt-1">Paused</p>
                   )}
+                  <RuleSummary
+                    info={keyRules[key.id]}
+                    onEdit={() => setEditingRuleKey({ id: key.id, name: key.name, rule: keyRules[key.id]?.rule || null })}
+                    onCheck={() => handleCheckModels(key)}
+                  />
                 </div>
                 <div className="flex items-center gap-2">
                   <Toggle
@@ -1470,6 +1563,25 @@ export default function APIPageClient({ machineId }) {
         message={confirmState?.message}
         variant="danger"
       />
+
+      {editingRuleKey && ruleOptions && (
+        <RuleConfigModal
+          key={editingRuleKey.id}
+          apiKey={editingRuleKey}
+          options={ruleOptions}
+          onClose={() => setEditingRuleKey(null)}
+          onSaved={() => fetchData()}
+        />
+      )}
+
+      <Modal
+        isOpen={!!checkingModelsKey}
+        title={checkingModelsKey ? `Models visible to "${checkingModelsKey.name}"` : "Models"}
+        onClose={() => { setCheckingModelsKey(null); setCheckModelsResult(null); }}
+        size="lg"
+      >
+        <CheckModelsResult result={checkModelsResult} />
+      </Modal>
     </div>
   );
 }
@@ -1553,3 +1665,105 @@ function SecurityWarning({ message, action }) {
 APIPageClient.propTypes = {
   machineId: PropTypes.string.isRequired,
 };
+
+/**
+ * Inline access-rule status + edit button for an API key. Renders a green
+ * "Has access" badge with a short summary when the key has a non-empty rule;
+ * red "No access" when not. Clicking opens RuleConfigModal via onEdit().
+ */
+function RuleSummary({ info, onEdit, onCheck }) {
+  const rule = info?.rule;
+  const status = info?.status;
+  const isGreen = status === "green";
+  const summary = isGreen ? summarizeRule(rule) : "No access — default-deny";
+  const hadRule = !!rule && (
+    (rule.providers?.length || 0) +
+    (rule.connections?.length || 0) +
+    (rule.models?.length || 0) +
+    (rule.combos?.length || 0)
+  ) > 0;
+  return (
+    <div className="mt-2 flex items-center gap-2 flex-wrap">
+      <Badge variant={isGreen ? "success" : "error"} size="sm" dot>
+        {isGreen ? "Has access" : "No access"}
+      </Badge>
+      <span className="text-xs text-text-muted truncate">{summary}</span>
+      <button
+        type="button"
+        onClick={onEdit}
+        className="text-xs font-medium text-primary hover:underline shrink-0"
+      >
+        {hadRule ? "Edit rule" : "Create rule"}
+      </button>
+      <button
+        type="button"
+        onClick={onCheck}
+        className="text-xs font-medium text-text-muted hover:text-primary hover:underline shrink-0"
+        title="Call /v1/models with this key to see exactly what it can access"
+      >
+        Test models
+      </button>
+    </div>
+  );
+}
+
+function summarizeRule(rule) {
+  if (!rule) return "";
+  const parts = [];
+  for (const [key, label] of [["providers","providers"],["connections","connections"],["models","models"],["combos","combos"]]) {
+    const arr = rule[key] || [];
+    if (arr.length === 1 && arr[0] === "*") parts.push(`All ${label}`);
+    else if (arr.length > 0) parts.push(`${arr.length} ${label}`);
+  }
+  return parts.join(" · ");
+}
+
+/**
+ * Result panel for the "Test models" probe. Renders the live response from
+ * /v1/models for a specific key — the same shape an external client like
+ * Cursor/Cline would see. Empty list when default-deny; populated when the
+ * rule grants something. The status/timing line proves the server actually
+ * answered (vs. a stale dashboard view).
+ */
+function CheckModelsResult({ result }) {
+  if (!result) return null;
+  if (result.loading) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-text-muted">
+        <span className="material-symbols-outlined animate-spin text-[18px]">progress_activity</span>
+        Calling /v1/models with this key…
+      </div>
+    );
+  }
+  if (result.error) {
+    return (
+      <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-red-900 dark:border-red-800 dark:bg-red-950/30 dark:text-red-100 sm:p-4">
+        <div className="flex items-center gap-2 font-semibold text-sm">
+          <span className="material-symbols-outlined text-[18px]">error</span>
+          Request failed{result.status ? ` (HTTP ${result.status})` : ""}
+        </div>
+        <pre className="mt-2 max-h-[280px] max-w-full overflow-auto whitespace-pre-wrap break-words rounded-lg border border-red-200/60 bg-red-100/40 p-3 font-mono text-xs dark:border-red-800/60 dark:bg-red-950/40">
+          {result.error}
+        </pre>
+      </div>
+    );
+  }
+  const ids = result.models || [];
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="text-xs text-text-muted">
+        GET /v1/models → HTTP {result.status} · {ids.length} model{ids.length === 1 ? "" : "s"}
+        {typeof result.ms === "number" ? ` · ${result.ms}ms` : ""}
+      </div>
+      {ids.length === 0 ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
+          No models. The key has no rule (default-deny) or the rule grants nothing.
+        </div>
+      ) : (
+        <pre className="max-h-[400px] max-w-full overflow-auto rounded-lg border border-black/5 bg-black/5 p-3 font-mono text-xs text-text-main dark:border-white/5 dark:bg-white/5 sm:p-4">
+          {ids.join("\n")}
+        </pre>
+      )}
+    </div>
+  );
+}

@@ -8,7 +8,10 @@ import {
   isValidApiKey,
 } from "../services/auth.js";
 import { cacheClaudeHeaders } from "open-sse/utils/claudeHeaderCache.js";
-import { getSettings } from "@/lib/localDb";
+import { getSettings, getApiKeyByKey, getRule, getCombos } from "@/lib/localDb";
+import { isModelAllowedForKey } from "@/lib/access/ruleEval";
+import { getProviderAlias } from "@/shared/constants/providers";
+import { getConsistentMachineId } from "@/shared/utils/machineId";
 import { getModelInfo, getComboModels } from "../services/model.js";
 import { handleChatCore } from "open-sse/handlers/chatCore.js";
 import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
@@ -79,6 +82,30 @@ export async function handleChat(request, clientRawRequest = null) {
     }
   }
 
+  // Resolve the key's access rule once. DEFAULT-DENY: when a known key is
+  // presented, its rule gates every provider/model/connection (no rule = none).
+  // No key + requireApiKey off → enforceRules stays false → unchanged behavior.
+  // Internal callers (e.g. /api/models/test → /v1/embeddings, /v1/chat/...)
+  // present a valid x-9r-cli-token; bypass rules so the dashboard's "test
+  // model" probe works regardless of the picked key's rule.
+  let keyRule = null;
+  let enforceRules = false;
+  const cliToken = request.headers.get("x-9r-cli-token");
+  let cliBypass = false;
+  if (cliToken) {
+    try {
+      const expected = await getConsistentMachineId("9r-cli-auth");
+      if (cliToken === expected) cliBypass = true;
+    } catch { /* fall through; treat as no bypass */ }
+  }
+  if (apiKey && !cliBypass) {
+    const keyRecord = await getApiKeyByKey(apiKey);
+    if (keyRecord) {
+      enforceRules = true;
+      keyRule = await getRule(keyRecord.id);
+    }
+  }
+
   if (!modelStr) {
     log.warn("CHAT", "Missing model");
     return errorResponse(HTTP_STATUS.BAD_REQUEST, "Missing model");
@@ -102,7 +129,7 @@ export async function handleChat(request, clientRawRequest = null) {
     return handleComboChat({
       body,
       models: comboModels,
-      handleSingleModel: (b, m) => handleSingleModelChat(b, m, clientRawRequest, request, apiKey),
+      handleSingleModel: (b, m) => handleSingleModelChat(b, m, clientRawRequest, request, apiKey, enforceRules, keyRule),
       log,
       comboName: modelStr,
       comboStrategy,
@@ -111,13 +138,13 @@ export async function handleChat(request, clientRawRequest = null) {
   }
 
   // Single model request
-  return handleSingleModelChat(body, modelStr, clientRawRequest, request, apiKey);
+  return handleSingleModelChat(body, modelStr, clientRawRequest, request, apiKey, enforceRules, keyRule);
 }
 
 /**
  * Handle single model chat request
  */
-async function handleSingleModelChat(body, modelStr, clientRawRequest = null, request = null, apiKey = null) {
+async function handleSingleModelChat(body, modelStr, clientRawRequest = null, request = null, apiKey = null, enforceRules = false, keyRule = null) {
   const modelInfo = await getModelInfo(modelStr);
 
   // If provider is null, this might be a combo name - check and handle
@@ -184,6 +211,30 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
 
     // Log account selection
     log.info("AUTH", `\x1b[32mUsing ${provider} account: ${credentials.connectionName}\x1b[0m`);
+
+    // Per-API-key access rule check (default-deny). All resolved values are
+    // known here: provider, model, the picked connectionId, and the output
+    // alias (which may be a custom prefix on the connection).
+    if (enforceRules) {
+      const combos = await getCombos();
+      const outputAlias = credentials?.providerSpecificData?.prefix || getProviderAlias(provider) || provider;
+      const allowed = isModelAllowedForKey({
+        rule: keyRule,
+        provider,
+        modelId: `${outputAlias}/${model}`,
+        bareModel: model,
+        connectionId: credentials.connectionId,
+        combos,
+        // Also accept the client's original model string — for providers like
+        // kiro/qoder, /v1/models emits ids like "uq/kiro/<model>" rather than
+        // `${alias}/${model}`, and the dashboard stores those exact ids.
+        candidateIds: [modelStr],
+      });
+      if (!allowed) {
+        log.warn("RULES", `API key denied access to ${provider}/${model} (conn ${credentials.connectionId})`);
+        return errorResponse(HTTP_STATUS.FORBIDDEN, `API key is not permitted to access ${provider}/${model}`);
+      }
+    }
 
     const refreshedCredentials = await checkAndRefreshToken(provider, credentials);
 
