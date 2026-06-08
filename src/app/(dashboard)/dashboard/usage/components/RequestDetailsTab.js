@@ -387,11 +387,22 @@ export default function RequestDetailsTab() {
                   minTickGap={24}
                 />
                 <YAxis
+                  yAxisId="count"
                   tick={{ fontSize: 10, fill: "currentColor", fillOpacity: 0.5 }}
                   tickLine={false}
                   axisLine={false}
                   allowDecimals={false}
                   width={40}
+                />
+                <YAxis
+                  yAxisId="rate"
+                  orientation="right"
+                  domain={[0, "auto"]}
+                  unit="%"
+                  tick={{ fontSize: 10, fill: "#ef4444", fillOpacity: 0.8 }}
+                  tickLine={false}
+                  axisLine={false}
+                  width={44}
                 />
                 <Tooltip
                   contentStyle={{
@@ -400,11 +411,12 @@ export default function RequestDetailsTab() {
                     borderRadius: "8px",
                     fontSize: "12px",
                   }}
+                  formatter={(value, name) => (name === "Fail rate" ? [`${value}%`, name] : [value, name])}
                 />
                 <Legend wrapperStyle={{ fontSize: "12px" }} />
-                <Line type="monotone" dataKey="total" name="Total" stroke="#6366f1" strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="success" name="Success" stroke="#22c55e" strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="failed" name="Failed" stroke="#ef4444" strokeWidth={2} dot={false} />
+                <Line yAxisId="count" type="monotone" dataKey="total" name="Total" stroke="#6366f1" strokeWidth={2} dot={false} />
+                <Line yAxisId="count" type="monotone" dataKey="success" name="Success" stroke="#22c55e" strokeWidth={2} dot={false} />
+                <Line yAxisId="rate" type="monotone" dataKey="failRate" name="Fail rate" stroke="#ef4444" strokeWidth={2.5} dot={false} />
               </LineChart>
             </ResponsiveContainer>
           )}

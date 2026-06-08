@@ -280,7 +280,13 @@ export async function getRequestDetailsStats(filter = {}) {
      FROM requestDetails ${where}
      GROUP BY date ORDER BY date ASC`,
     params
-  ).map((r) => ({ date: r.date, total: r.total, success: r.success, failed: r.total - r.success }));
+  ).map((r) => {
+    const failed = r.total - r.success;
+    // failRate (%) is the highlight metric: visible even when failed counts are
+    // tiny next to total/success. One decimal of precision.
+    const failRate = r.total ? Math.round((failed / r.total) * 1000) / 10 : 0;
+    return { date: r.date, total: r.total, success: r.success, failed, failRate };
+  });
 
   const byProvider = db.all(
     `SELECT COALESCE(provider, 'unknown') AS provider, COUNT(*) AS total
