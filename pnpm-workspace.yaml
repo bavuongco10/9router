@@ -1,4 +1,10 @@
-onlyBuiltDependencies:
-  - better-sqlite3
-  - sharp
-  - unrs-resolver
+# pnpm v11 config. `allowBuilds` replaces the removed `onlyBuiltDependencies`
+# (https://pnpm.io/settings) — without it, `pnpm install --frozen-lockfile`
+# fails with ERR_PNPM_IGNORED_BUILDS and the native modules never compile.
+allowBuilds:
+  better-sqlite3: true
+  sharp: true
+  unrs-resolver: true
+# Don't auto-run install before `pnpm run` scripts; the Docker build installs
+# explicitly with --frozen-lockfile beforehand.
+verifyDepsBeforeRun: false
