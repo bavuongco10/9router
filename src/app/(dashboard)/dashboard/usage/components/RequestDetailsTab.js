@@ -126,6 +126,9 @@ export default function RequestDetailsTab() {
   const [stats, setStats] = useState(null);
   // Time-bucket granularity for the "Requests Over Time" chart.
   const [granularity, setGranularity] = useState("hour");
+  // Which Y axis/metric the chart shows: "counts" (Total/Success/Failed) or
+  // "rate" (failure rate %). One axis at a time.
+  const [chartMetric, setChartMetric] = useState("counts");
   const [filters, setFilters] = useState({
     provider: "",
     startDate: "",
@@ -353,22 +356,38 @@ export default function RequestDetailsTab() {
         <Card className="flex min-w-0 flex-col gap-3 p-3 sm:p-4">
           <div className="flex items-center justify-between gap-3">
             <span className="text-text-muted text-xs uppercase font-semibold">Requests Over Time</span>
-            <select
-              aria-label="Chart granularity"
-              value={granularity}
-              onChange={(e) => setGranularity(e.target.value)}
-              className={cn(
-                "h-8 px-2 rounded-lg border border-black/10 dark:border-white/10 bg-surface",
-                "text-xs text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20",
-                "cursor-pointer"
-              )}
-              style={{ colorScheme: 'auto' }}
-            >
-              <option value="hour">By Hour</option>
-              <option value="day">By Day</option>
-              <option value="week">By Week</option>
-              <option value="month">By Month</option>
-            </select>
+            <div className="flex items-center gap-2">
+              <select
+                aria-label="Chart metric"
+                value={chartMetric}
+                onChange={(e) => setChartMetric(e.target.value)}
+                className={cn(
+                  "h-8 px-2 rounded-lg border border-black/10 dark:border-white/10 bg-surface",
+                  "text-xs text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20",
+                  "cursor-pointer"
+                )}
+                style={{ colorScheme: 'auto' }}
+              >
+                <option value="counts">Counts</option>
+                <option value="rate">Fail rate %</option>
+              </select>
+              <select
+                aria-label="Chart granularity"
+                value={granularity}
+                onChange={(e) => setGranularity(e.target.value)}
+                className={cn(
+                  "h-8 px-2 rounded-lg border border-black/10 dark:border-white/10 bg-surface",
+                  "text-xs text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20",
+                  "cursor-pointer"
+                )}
+                style={{ colorScheme: 'auto' }}
+              >
+                <option value="hour">By Hour</option>
+                <option value="day">By Day</option>
+                <option value="week">By Week</option>
+                <option value="month">By Month</option>
+              </select>
+            </div>
           </div>
           {!stats ? (
             <div className="h-56 flex items-center justify-center text-text-muted text-sm">Loading...</div>
@@ -387,21 +406,12 @@ export default function RequestDetailsTab() {
                   minTickGap={24}
                 />
                 <YAxis
-                  yAxisId="count"
-                  tick={{ fontSize: 10, fill: "currentColor", fillOpacity: 0.5 }}
+                  domain={chartMetric === "rate" ? [0, "auto"] : undefined}
+                  unit={chartMetric === "rate" ? "%" : undefined}
+                  tick={{ fontSize: 10, fill: chartMetric === "rate" ? "#ef4444" : "currentColor", fillOpacity: chartMetric === "rate" ? 0.8 : 0.5 }}
                   tickLine={false}
                   axisLine={false}
-                  allowDecimals={false}
-                  width={40}
-                />
-                <YAxis
-                  yAxisId="rate"
-                  orientation="right"
-                  domain={[0, "auto"]}
-                  unit="%"
-                  tick={{ fontSize: 10, fill: "#ef4444", fillOpacity: 0.8 }}
-                  tickLine={false}
-                  axisLine={false}
+                  allowDecimals={chartMetric === "rate"}
                   width={44}
                 />
                 <Tooltip
@@ -414,9 +424,15 @@ export default function RequestDetailsTab() {
                   formatter={(value, name) => (name === "Fail rate" ? [`${value}%`, name] : [value, name])}
                 />
                 <Legend wrapperStyle={{ fontSize: "12px" }} />
-                <Line yAxisId="count" type="monotone" dataKey="total" name="Total" stroke="#6366f1" strokeWidth={2} dot={false} />
-                <Line yAxisId="count" type="monotone" dataKey="success" name="Success" stroke="#22c55e" strokeWidth={2} dot={false} />
-                <Line yAxisId="rate" type="monotone" dataKey="failRate" name="Fail rate" stroke="#ef4444" strokeWidth={2.5} dot={false} />
+                {chartMetric === "rate" ? (
+                  <Line type="monotone" dataKey="failRate" name="Fail rate" stroke="#ef4444" strokeWidth={2.5} dot={false} />
+                ) : (
+                  <>
+                    <Line type="monotone" dataKey="total" name="Total" stroke="#6366f1" strokeWidth={2} dot={false} />
+                    <Line type="monotone" dataKey="success" name="Success" stroke="#22c55e" strokeWidth={2} dot={false} />
+                    <Line type="monotone" dataKey="failed" name="Failed" stroke="#ef4444" strokeWidth={2} dot={false} />
+                  </>
+                )}
               </LineChart>
             </ResponsiveContainer>
           )}
