@@ -1,5 +1,5 @@
 // Latest schema version — bumped when a migration is added in ./migrations/
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -139,6 +139,13 @@ export const TABLES = {
       model: "TEXT",
       connectionId: "TEXT",
       status: "TEXT",
+      // Lightweight summary columns — list & analytics read these instead of
+      // parsing the heavy `data` blob. Heavy bodies are offloaded to gzip
+      // files (see requestPayloadStore.js).
+      inputTokens: "INTEGER",
+      outputTokens: "INTEGER",
+      latencyTotal: "INTEGER",
+      latencyTtft: "INTEGER",
       data: "TEXT NOT NULL",
     },
     indexes: [

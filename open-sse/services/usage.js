@@ -47,10 +47,74 @@ const CODEX_CONFIG = {
 // Claude API config
 const CLAUDE_CONFIG = {
   oauthUsageUrl: "https://api.anthropic.com/api/oauth/usage",
+  profileUrl: "https://api.anthropic.com/api/oauth/profile",
   usageUrl: "https://api.anthropic.com/v1/organizations/{org_id}/usage",
   settingsUrl: "https://api.anthropic.com/v1/settings",
   apiVersion: "2023-06-01",
 };
+
+/**
+ * Derive the Claude account tier label from the OAuth profile.
+ *
+ * Authoritative source: organization.organization_type +
+ * organization.rate_limit_tier (the same fields the Claude Code CLI reads).
+ * Falls back to the has_claude_max/has_claude_pro flags exposed on
+ * API-key profiles when no organization type is present.
+ *
+ * @param {Object} profile - Parsed /api/oauth/profile response
+ * @returns {string|null} A short tier label (e.g. "Max 20×", "Pro") or null
+ */
+function detectClaudeTier(profile) {
+  if (!profile || typeof profile !== "object") return null;
+
+  const org = profile.organization || {};
+  const orgType = (org.organization_type || "").toLowerCase();
+  const rateTier = (org.rate_limit_tier || "").toLowerCase();
+
+  switch (orgType) {
+    case "claude_max":
+      // default_claude_max_20x / default_claude_max_5x
+      return rateTier.includes("20x") ? "Max 20×" : "Max 5×";
+    case "claude_pro":
+      return "Pro";
+    case "claude_team":
+      return rateTier.includes("5x") ? "Team Premium" : "Team";
+    case "claude_enterprise":
+      return "Enterprise";
+    default:
+      break;
+  }
+
+  // Fallback for API-key profiles that omit organization_type
+  if (profile.has_claude_max) return "Max";
+  if (profile.has_claude_pro) return "Pro";
+
+  return null;
+}
+
+/**
+ * Fetch the Claude OAuth profile and return its tier label.
+ * Returns null on any failure so usage display is never blocked.
+ */
+async function getClaudeTier(accessToken, proxyOptions = null) {
+  try {
+    const response = await proxyAwareFetch(CLAUDE_CONFIG.profileUrl, {
+      method: "GET",
+      headers: {
+        "Authorization": `Bearer ${accessToken}`,
+        "anthropic-beta": "oauth-2025-04-20",
+        "anthropic-version": CLAUDE_CONFIG.apiVersion,
+      },
+    }, proxyOptions);
+
+    if (!response.ok) return null;
+    const profile = await response.json();
+    return detectClaudeTier(profile);
+  } catch (error) {
+    console.warn(`[Claude Profile] Unable to fetch tier: ${error.message}`);
+    return null;
+  }
+}
 
 /**
  * Get usage data for a provider connection
@@ -496,15 +560,18 @@ async function getAntigravitySubscriptionInfo(accessToken, proxyOptions = null) 
  */
 async function getClaudeUsage(accessToken, proxyOptions = null) {
   try {
-    // Primary: OAuth usage endpoint (Claude Code consumer OAuth tokens)
-    const oauthResponse = await proxyAwareFetch(CLAUDE_CONFIG.oauthUsageUrl, {
-      method: "GET",
-      headers: {
-        "Authorization": `Bearer ${accessToken}`,
-        "anthropic-beta": "oauth-2025-04-20",
-        "anthropic-version": CLAUDE_CONFIG.apiVersion,
-      },
-    }, proxyOptions);
+    // Fetch usage + account tier in parallel (tier is best-effort)
+    const [oauthResponse, tier] = await Promise.all([
+      proxyAwareFetch(CLAUDE_CONFIG.oauthUsageUrl, {
+        method: "GET",
+        headers: {
+          "Authorization": `Bearer ${accessToken}`,
+          "anthropic-beta": "oauth-2025-04-20",
+          "anthropic-version": CLAUDE_CONFIG.apiVersion,
+        },
+      }, proxyOptions),
+      getClaudeTier(accessToken, proxyOptions),
+    ]);
 
     if (oauthResponse.ok) {
       const data = await oauthResponse.json();
@@ -545,6 +612,7 @@ async function getClaudeUsage(accessToken, proxyOptions = null) {
 
       return {
         plan: "Claude Code",
+        tier,
         extraUsage: data.extra_usage ?? null,
         quotas,
       };
@@ -552,7 +620,8 @@ async function getClaudeUsage(accessToken, proxyOptions = null) {
 
     // Fallback: legacy settings + org usage endpoint
     console.warn(`[Claude Usage] OAuth endpoint returned ${oauthResponse.status}, falling back to legacy`);
-    return await getClaudeUsageLegacy(accessToken, proxyOptions);
+    const legacy = await getClaudeUsageLegacy(accessToken, proxyOptions);
+    return tier ? { ...legacy, tier } : legacy;
   } catch (error) {
     return { message: `Claude connected. Unable to fetch usage: ${error.message}` };
   }

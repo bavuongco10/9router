@@ -1,10 +1,10 @@
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
+import { writePayload, readPayload } from "./requestPayloadStore.js";
 
 const DEFAULT_MAX_RECORDS = 200;
 const DEFAULT_BATCH_SIZE = 20;
 const DEFAULT_FLUSH_INTERVAL_MS = 5000;
-const DEFAULT_MAX_JSON_SIZE = 5 * 1024;
 const CONFIG_CACHE_TTL_MS = 5000;
 
 let cachedConfig = null;
@@ -24,7 +24,6 @@ async function getObservabilityConfig() {
       maxRecords: settings.observabilityMaxRecords || parseInt(process.env.OBSERVABILITY_MAX_RECORDS || String(DEFAULT_MAX_RECORDS), 10),
       batchSize: settings.observabilityBatchSize || parseInt(process.env.OBSERVABILITY_BATCH_SIZE || String(DEFAULT_BATCH_SIZE), 10),
       flushIntervalMs: settings.observabilityFlushIntervalMs || parseInt(process.env.OBSERVABILITY_FLUSH_INTERVAL_MS || String(DEFAULT_FLUSH_INTERVAL_MS), 10),
-      maxJsonSize: (settings.observabilityMaxJsonSize || parseInt(process.env.OBSERVABILITY_MAX_JSON_SIZE || "5", 10)) * 1024,
     };
   } catch {
     cachedConfig = {
@@ -32,7 +31,6 @@ async function getObservabilityConfig() {
       maxRecords: DEFAULT_MAX_RECORDS,
       batchSize: DEFAULT_BATCH_SIZE,
       flushIntervalMs: DEFAULT_FLUSH_INTERVAL_MS,
-      maxJsonSize: DEFAULT_MAX_JSON_SIZE,
     };
   }
   cachedConfigTs = Date.now();
@@ -60,12 +58,50 @@ function generateDetailId(model) {
   return `${timestamp}-${random}-${modelPart}`;
 }
 
-function truncateField(obj, maxSize) {
-  const str = JSON.stringify(obj || {});
-  if (str.length > maxSize) {
-    return { _truncated: true, _originalSize: str.length, _preview: str.substring(0, 200) };
-  }
-  return obj || {};
+// Build the light summary (kept in the `data` column as the drawer fallback)
+// and the full detail (offloaded, gzipped, to disk).
+function prepareRecord(item) {
+  if (!item.id) item.id = generateDetailId(item.model);
+  if (!item.timestamp) item.timestamp = new Date().toISOString();
+  if (item.request?.headers) item.request.headers = sanitizeHeaders(item.request.headers);
+
+  const tokens = item.tokens || {};
+  const latency = item.latency || {};
+
+  const summary = {
+    id: item.id,
+    timestamp: item.timestamp,
+    provider: item.provider || null,
+    model: item.model || null,
+    connectionId: item.connectionId || null,
+    status: item.status || null,
+    latency,
+    tokens,
+  };
+
+  // Full (untruncated) bodies live in the offloaded file only.
+  const fullDetail = {
+    ...summary,
+    request: item.request ?? null,
+    providerRequest: item.providerRequest ?? null,
+    providerResponse: item.providerResponse ?? null,
+    response: item.response ?? null,
+  };
+
+  return {
+    id: item.id,
+    timestamp: item.timestamp,
+    provider: summary.provider,
+    model: summary.model,
+    connectionId: summary.connectionId,
+    status: summary.status,
+    inputTokens: rowInputTokens(tokens),
+    outputTokens: tokens.completion_tokens || tokens.output_tokens || 0,
+    latencyTotal: latency.total || 0,
+    latencyTtft: latency.ttft || 0,
+    summary,
+    fullDetail,
+  };
 }
 
 async function flushToDatabase() {
@@ -77,43 +113,26 @@ async function flushToDatabase() {
     while (writeBuffer.length > 0) {
       const items = writeBuffer.splice(0, writeBuffer.length);
       const db = await getAdapter();
-      const config = await getObservabilityConfig();
+
+      const prepared = items.map(prepareRecord);
 
       db.transaction(() => {
-        for (const item of items) {
-          if (!item.id) item.id = generateDetailId(item.model);
-          if (!item.timestamp) item.timestamp = new Date().toISOString();
-          if (item.request?.headers) item.request.headers = sanitizeHeaders(item.request.headers);
-
-          const record = {
-            id: item.id,
-            provider: item.provider || null,
-            model: item.model || null,
-            connectionId: item.connectionId || null,
-            timestamp: item.timestamp,
-            status: item.status || null,
-            latency: item.latency || {},
-            tokens: item.tokens || {},
-            request: truncateField(item.request, config.maxJsonSize),
-            providerRequest: truncateField(item.providerRequest, config.maxJsonSize),
-            providerResponse: truncateField(item.providerResponse, config.maxJsonSize),
-            response: truncateField(item.response, config.maxJsonSize),
-          };
-
+        for (const p of prepared) {
           db.run(
-            `INSERT INTO requestDetails(id, timestamp, provider, model, connectionId, status, data) VALUES(?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET timestamp = excluded.timestamp, provider = excluded.provider, model = excluded.model, connectionId = excluded.connectionId, status = excluded.status, data = excluded.data`,
-            [record.id, record.timestamp, record.provider, record.model, record.connectionId, record.status, stringifyJson(record)]
+            `INSERT INTO requestDetails(id, timestamp, provider, model, connectionId, status, inputTokens, outputTokens, latencyTotal, latencyTtft, data)
+             VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET timestamp = excluded.timestamp, provider = excluded.provider, model = excluded.model, connectionId = excluded.connectionId, status = excluded.status, inputTokens = excluded.inputTokens, outputTokens = excluded.outputTokens, latencyTotal = excluded.latencyTotal, latencyTtft = excluded.latencyTtft, data = excluded.data`,
+            [p.id, p.timestamp, p.provider, p.model, p.connectionId, p.status, p.inputTokens, p.outputTokens, p.latencyTotal, p.latencyTtft, stringifyJson(p.summary)]
           );
         }
-
-        const cnt = db.get(`SELECT COUNT(*) as c FROM requestDetails`);
-        if (cnt && cnt.c > config.maxRecords) {
-          db.run(
-            `DELETE FROM requestDetails WHERE id IN (SELECT id FROM requestDetails ORDER BY timestamp ASC LIMIT ?)`,
-            [cnt.c - config.maxRecords]
-          );
-        }
+        // No record cap: summary rows are tiny and intentionally uncapped.
+        // Heavy payloads are size-capped separately in requestPayloadStore.
       });
+
+      // Offload heavy payloads to disk (gzip) outside the DB transaction.
+      for (const p of prepared) {
+        writePayload(p.id, p.timestamp, p.fullDetail).catch(() => {});
+      }
     }
   } catch (e) {
     console.error("[requestDetailsRepo] Batch write failed:", e);
@@ -141,19 +160,27 @@ export async function saveRequestDetail(detail) {
   }
 }
 
-export async function getRequestDetails(filter = {}) {
-  const db = await getAdapter();
+function buildDetailWhere(filter = {}) {
   const conds = [];
   const params = [];
 
   if (filter.provider) { conds.push("provider = ?"); params.push(filter.provider); }
   if (filter.model) { conds.push("model = ?"); params.push(filter.model); }
   if (filter.connectionId) { conds.push("connectionId = ?"); params.push(filter.connectionId); }
-  if (filter.status) { conds.push("status = ?"); params.push(filter.status); }
+  // "failed" = any status that is not "success" (covers "failed", "error", NULL, ...).
+  if (filter.status === "success") { conds.push("status = ?"); params.push("success"); }
+  else if (filter.status === "failed") { conds.push("(status IS NULL OR status <> ?)"); params.push("success"); }
+  else if (filter.status) { conds.push("status = ?"); params.push(filter.status); }
   if (filter.startDate) { conds.push("timestamp >= ?"); params.push(new Date(filter.startDate).toISOString()); }
   if (filter.endDate) { conds.push("timestamp <= ?"); params.push(new Date(filter.endDate).toISOString()); }
 
-  const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
+  return { where: conds.length ? `WHERE ${conds.join(" AND ")}` : "", params };
+}
+
+export async function getRequestDetails(filter = {}) {
+  const db = await getAdapter();
+  const { where, params } = buildDetailWhere(filter);
+
   const cntRow = db.get(`SELECT COUNT(*) as c FROM requestDetails ${where}`, params);
   const totalItems = cntRow ? cntRow.c : 0;
 
@@ -162,11 +189,23 @@ export async function getRequestDetails(filter = {}) {
   const totalPages = Math.ceil(totalItems / pageSize);
   const offset = (page - 1) * pageSize;
 
+  // Columns only — never touch the heavy payload. The shape mirrors the old
+  // detail object closely enough that the table renders unchanged.
   const rows = db.all(
-    `SELECT data FROM requestDetails ${where} ORDER BY timestamp DESC LIMIT ? OFFSET ?`,
+    `SELECT id, timestamp, provider, model, connectionId, status, inputTokens, outputTokens, latencyTotal, latencyTtft
+     FROM requestDetails ${where} ORDER BY timestamp DESC LIMIT ? OFFSET ?`,
     [...params, pageSize, offset]
   );
-  const details = rows.map((r) => parseJson(r.data, {}));
+  const details = rows.map((r) => ({
+    id: r.id,
+    timestamp: r.timestamp,
+    provider: r.provider,
+    model: r.model,
+    connectionId: r.connectionId,
+    status: r.status,
+    tokens: { prompt_tokens: r.inputTokens || 0, completion_tokens: r.outputTokens || 0 },
+    latency: { ttft: r.latencyTtft || 0, total: r.latencyTotal || 0 },
+  }));
 
   return {
     details,
@@ -174,10 +213,80 @@ export async function getRequestDetails(filter = {}) {
   };
 }
 
+// Full detail for the drawer. Heavy bodies come from the offloaded gzip file;
+// if it was evicted (or this is a pre-migration row), fall back to the light
+// summary stored in the `data` column.
 export async function getRequestDetailById(id) {
+  const fromFile = await readPayload(id);
+  if (fromFile) return fromFile;
+
   const db = await getAdapter();
   const row = db.get(`SELECT data FROM requestDetails WHERE id = ?`, [id]);
-  return row ? parseJson(row.data, null) : null;
+  if (!row) return null;
+  const fallback = parseJson(row.data, null);
+  if (fallback && typeof fallback === "object") {
+    // Pre-migration rows still carry full bodies in `data`; new rows store only
+    // the light summary, so missing bodies means the payload was evicted.
+    const hasBodies = !!(fallback.request || fallback.response || fallback.providerRequest || fallback.providerResponse);
+    if (!hasBodies) fallback.payloadEvicted = true;
+  }
+  return fallback;
+}
+
+function rowInputTokens(tokens) {
+  const prompt = tokens?.prompt_tokens || tokens?.input_tokens || 0;
+  const cache = tokens?.cached_tokens || tokens?.cache_read_input_tokens || 0;
+  return prompt < cache ? cache : prompt;
+}
+
+// Aggregated over ALL filtered rows via pure SQL on the summary columns — no
+// JSON parsing, no loading rows into JS, so it scales to unlimited records.
+export async function getRequestDetailsStats(filter = {}) {
+  const db = await getAdapter();
+  const { where, params } = buildDetailWhere(filter);
+
+  const totals = db.get(
+    `SELECT
+       COUNT(*) AS total,
+       SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) AS success,
+       COALESCE(SUM(inputTokens), 0) AS totalInputTokens,
+       COALESCE(SUM(outputTokens), 0) AS totalOutputTokens,
+       COALESCE(AVG(CASE WHEN latencyTotal > 0 THEN latencyTotal END), 0) AS avgLatency
+     FROM requestDetails ${where}`,
+    params
+  ) || {};
+
+  const total = totals.total || 0;
+  const success = totals.success || 0;
+  const failed = total - success;
+
+  const byDay = db.all(
+    `SELECT substr(timestamp, 1, 10) AS date,
+            COUNT(*) AS total,
+            SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) AS success
+     FROM requestDetails ${where}
+     GROUP BY date ORDER BY date ASC`,
+    params
+  ).map((r) => ({ date: r.date, total: r.total, success: r.success, failed: r.total - r.success }));
+
+  const byProvider = db.all(
+    `SELECT COALESCE(provider, 'unknown') AS provider, COUNT(*) AS total
+     FROM requestDetails ${where}
+     GROUP BY provider ORDER BY total DESC`,
+    params
+  );
+
+  return {
+    total,
+    success,
+    failed,
+    successRate: total ? Math.round((success / total) * 100) : 0,
+    avgLatencyMs: Math.round(totals.avgLatency || 0),
+    totalOutputTokens: totals.totalOutputTokens || 0,
+    totalInputTokens: totals.totalInputTokens || 0,
+    byDay,
+    byProvider,
+  };
 }
 
 const _shutdownHandler = async () => {

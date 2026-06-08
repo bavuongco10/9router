@@ -358,6 +358,7 @@ export default function ProviderLimits() {
       const quotaEntry = {
         quotas: parsedQuotas,
         plan: data.plan || null,
+        tier: data.tier || null,
         message: data.message || null,
         raw: data,
       };
@@ -997,9 +998,19 @@ export default function ProviderLimits() {
                       />
                     </div>
                     <div className="min-w-0">
-                      <h3 className="text-sm font-semibold text-text-primary capitalize truncate">
-                        {conn.provider}
-                      </h3>
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <h3 className="text-sm font-semibold text-text-primary capitalize truncate">
+                          {conn.provider}
+                        </h3>
+                        {quota?.tier ? (
+                          <span
+                            className="shrink-0 rounded-full border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-primary"
+                            title={`Claude account tier: ${quota.tier}`}
+                          >
+                            {quota.tier}
+                          </span>
+                        ) : null}
+                      </div>
                       {getConnectionLabel(conn) ? (
                         <p className="text-xs text-text-muted truncate">
                           {getConnectionLabel(conn)}

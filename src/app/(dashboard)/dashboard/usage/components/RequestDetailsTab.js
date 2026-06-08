@@ -1,6 +1,16 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback } from "react";
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Legend,
+} from "recharts";
 import Card from "@/shared/components/Card";
 import Button from "@/shared/components/Button";
 import Badge from "@/shared/components/Badge";
@@ -89,6 +99,16 @@ function getInputTokens(tokens) {
   return prompt < cache ? cache : prompt;
 }
 
+// Failed requests store the upstream error in `response.error`, often as a
+// JSON-encoded string. Pretty-print it when possible so the message is legible.
+function formatError(err) {
+  if (err == null) return "";
+  if (typeof err !== "string") {
+    try { return JSON.stringify(err, null, 2); } catch { return String(err); }
+  }
+  try { return JSON.stringify(JSON.parse(err), null, 2); } catch { return err; }
+}
+
 export default function RequestDetailsTab() {
   const [details, setDetails] = useState([]);
   const [pagination, setPagination] = useState({
@@ -99,13 +119,17 @@ export default function RequestDetailsTab() {
   });
   const [loading, setLoading] = useState(false);
   const [selectedDetail, setSelectedDetail] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [providers, setProviders] = useState([]);
   const [providerNameCache, setProviderNameCache] = useState(null);
+  const [stats, setStats] = useState(null);
   const [filters, setFilters] = useState({
     provider: "",
     startDate: "",
-    endDate: ""
+    endDate: "",
+    // Default to failures — we care about debugging failed requests, not successes.
+    status: "failed"
   });
 
   const fetchProviders = useCallback(async () => {
@@ -131,6 +155,7 @@ export default function RequestDetailsTab() {
       if (filters.provider) params.append("provider", filters.provider);
       if (filters.startDate) params.append("startDate", filters.startDate);
       if (filters.endDate) params.append("endDate", filters.endDate);
+      if (filters.status) params.append("status", filters.status);
 
       const res = await fetch(`/api/usage/request-details?${params}`);
       const data = await res.json();
@@ -144,6 +169,23 @@ export default function RequestDetailsTab() {
     }
   }, [pagination.page, pagination.pageSize, filters]);
 
+  // Analytics aggregated over ALL filtered requests (not just the current page).
+  const fetchStats = useCallback(async () => {
+    try {
+      const params = new URLSearchParams();
+      if (filters.provider) params.append("provider", filters.provider);
+      if (filters.startDate) params.append("startDate", filters.startDate);
+      if (filters.endDate) params.append("endDate", filters.endDate);
+      if (filters.status) params.append("status", filters.status);
+
+      const res = await fetch(`/api/usage/request-details/stats?${params}`);
+      const data = await res.json();
+      setStats(data);
+    } catch (error) {
+      console.error("Failed to fetch request stats:", error);
+    }
+  }, [filters]);
+
   useEffect(() => {
     fetchProviders();
   }, [fetchProviders]);
@@ -152,9 +194,31 @@ export default function RequestDetailsTab() {
     fetchDetails();
   }, [fetchDetails]);
 
-  const handleViewDetail = (detail) => {
+  useEffect(() => {
+    fetchStats();
+  }, [fetchStats]);
+
+  const handleViewDetail = async (detail) => {
+    // Open immediately with the summary row so the header renders without delay,
+    // then fetch the heavy bodies (gzipped on disk, decompressed server-side).
     setSelectedDetail(detail);
     setIsDrawerOpen(true);
+
+    if (!detail?.id) return;
+    setDetailLoading(true);
+    try {
+      const res = await fetch(`/api/usage/request-details/${encodeURIComponent(detail.id)}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const full = await res.json();
+      // Merge so the summary fields stay put if the payload was evicted.
+      setSelectedDetail((prev) =>
+        prev && prev.id === full.id ? { ...prev, ...full } : prev
+      );
+    } catch (error) {
+      console.error("Failed to fetch request detail:", error);
+    } finally {
+      setDetailLoading(false);
+    }
   };
 
   const handlePageChange = (newPage) => {
@@ -166,35 +230,13 @@ export default function RequestDetailsTab() {
   };
 
   const handleClearFilters = () => {
-    setFilters({ provider: "", startDate: "", endDate: "" });
+    setFilters({ provider: "", startDate: "", endDate: "", status: "" });
   };
-
-  // Analytics over the currently loaded page of requests.
-  const analytics = useMemo(() => {
-    const total = details.length;
-    const success = details.filter((d) => d.status === "success").length;
-    const failed = total - success;
-    const successRate = total ? Math.round((success / total) * 100) : 0;
-
-    const latencies = details
-      .map((d) => d.latency?.total)
-      .filter((v) => typeof v === "number" && v > 0);
-    const avgLatency = latencies.length
-      ? Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length)
-      : 0;
-
-    const totalOutputTokens = details.reduce(
-      (sum, d) => sum + (d.tokens?.completion_tokens || 0),
-      0
-    );
-
-    return { total, success, failed, successRate, avgLatency, totalOutputTokens };
-  }, [details]);
 
   return (
     <div className="flex min-w-0 flex-col gap-6">
       <Card padding="md">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <div className="flex min-w-0 flex-col gap-2">
             <label htmlFor="provider-filter" className="text-sm font-medium text-text-main">Provider</label>
             <select
@@ -216,7 +258,26 @@ export default function RequestDetailsTab() {
               ))}
             </select>
           </div>
-          
+
+          <div className="flex min-w-0 flex-col gap-2">
+            <label htmlFor="status-filter" className="text-sm font-medium text-text-main">Status</label>
+            <select
+              id="status-filter"
+              value={filters.status}
+              onChange={(e) => setFilters({ ...filters, status: e.target.value })}
+              className={cn(
+                "h-9 px-3 rounded-lg border border-black/10 dark:border-white/10 bg-surface",
+                "text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20",
+                "w-full min-w-0 cursor-pointer"
+              )}
+              style={{ colorScheme: 'auto' }}
+            >
+              <option value="">All Statuses</option>
+              <option value="success">Success</option>
+              <option value="failed">Failed</option>
+            </select>
+          </div>
+
           <div className="flex min-w-0 flex-col gap-2">
             <label htmlFor="start-date-filter" className="text-sm font-medium text-text-main">Start Date</label>
             <input
@@ -249,9 +310,9 @@ export default function RequestDetailsTab() {
             <span className="hidden text-sm font-medium text-text-main opacity-0 lg:block" aria-hidden="true">Clear</span>
             <Button 
               variant="ghost" 
-              onClick={handleClearFilters}
-              disabled={!filters.provider && !filters.startDate && !filters.endDate}
-              className="w-full"
+                 onClick={handleClearFilters}
+        disabled={!filters.provider && !filters.startDate && !filters.endDate && !filters.status}
+         className="w-full"
             >
               Clear Filters
             </Button>
@@ -259,27 +320,69 @@ export default function RequestDetailsTab() {
         </div>
       </Card>
 
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <Card className="flex min-w-0 flex-col gap-1 px-4 py-3">
-          <span className="text-text-muted text-xs uppercase font-semibold">Total Requests</span>
-          <span className="truncate text-2xl font-bold text-text-main">{analytics.total.toLocaleString()}</span>
-        </Card>
-        <Card className="flex min-w-0 flex-col gap-1 px-4 py-3">
-          <span className="text-text-muted text-xs uppercase font-semibold">Success Rate</span>
-          <span className="flex items-baseline gap-2 truncate text-2xl font-bold text-text-main">
-            {analytics.successRate}%
-            <Badge variant={analytics.failed === 0 ? "success" : "warning"} size="sm">
-              {analytics.success}/{analytics.total}
-            </Badge>
-          </span>
-        </Card>
-        <Card className="flex min-w-0 flex-col gap-1 px-4 py-3">
-          <span className="text-text-muted text-xs uppercase font-semibold">Failed</span>
-          <span className="truncate text-2xl font-bold text-red-600 dark:text-red-400">{analytics.failed.toLocaleString()}</span>
-        </Card>
-        <Card className="flex min-w-0 flex-col gap-1 px-4 py-3">
-          <span className="text-text-muted text-xs uppercase font-semibold">Avg Latency</span>
-          <span className="truncate text-2xl font-bold text-text-main">{analytics.avgLatency.toLocaleString()}ms</span>
+      <div className="flex min-w-0 flex-col gap-4">
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          <Card className="flex min-w-0 flex-col gap-1 px-4 py-3">
+            <span className="text-text-muted text-xs uppercase font-semibold">Total Requests</span>
+            <span className="truncate text-2xl font-bold text-text-main">{(stats?.total ?? 0).toLocaleString()}</span>
+          </Card>
+          <Card className="flex min-w-0 flex-col gap-1 px-4 py-3">
+            <span className="text-text-muted text-xs uppercase font-semibold">Success Rate</span>
+            <span className="flex items-baseline gap-2 truncate text-2xl font-bold text-text-main">
+              {stats?.successRate ?? 0}%
+              <Badge variant={(stats?.failed ?? 0) === 0 ? "success" : "warning"} size="sm">
+                {(stats?.success ?? 0).toLocaleString()}/{(stats?.total ?? 0).toLocaleString()}
+              </Badge>
+            </span>
+          </Card>
+          <Card className="flex min-w-0 flex-col gap-1 px-4 py-3">
+            <span className="text-text-muted text-xs uppercase font-semibold">Failed</span>
+            <span className="truncate text-2xl font-bold text-red-600 dark:text-red-400">{(stats?.failed ?? 0).toLocaleString()}</span>
+          </Card>
+          <Card className="flex min-w-0 flex-col gap-1 px-4 py-3">
+            <span className="text-text-muted text-xs uppercase font-semibold">Avg Latency</span>
+            <span className="truncate text-2xl font-bold text-text-main">{(stats?.avgLatencyMs ?? 0).toLocaleString()}ms</span>
+          </Card>
+        </div>
+
+        <Card className="flex min-w-0 flex-col gap-3 p-3 sm:p-4">
+          <span className="text-text-muted text-xs uppercase font-semibold">Requests Over Time</span>
+          {!stats ? (
+            <div className="h-56 flex items-center justify-center text-text-muted text-sm">Loading...</div>
+          ) : !stats.byDay?.length ? (
+            <div className="h-56 flex items-center justify-center text-text-muted text-sm">No data for the selected filters</div>
+          ) : (
+            <ResponsiveContainer width="100%" height={240}>
+              <BarChart data={stats.byDay} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.1} />
+                <XAxis
+                  dataKey="date"
+                  tick={{ fontSize: 10, fill: "currentColor", fillOpacity: 0.5 }}
+                  tickLine={false}
+                  axisLine={false}
+                  interval="preserveStartEnd"
+                />
+                <YAxis
+                  tick={{ fontSize: 10, fill: "currentColor", fillOpacity: 0.5 }}
+                  tickLine={false}
+                  axisLine={false}
+                  allowDecimals={false}
+                  width={40}
+                />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: "var(--color-bg)",
+                    border: "1px solid var(--color-border)",
+                    borderRadius: "8px",
+                    fontSize: "12px",
+                  }}
+                />
+                <Legend wrapperStyle={{ fontSize: "12px" }} />
+                <Bar dataKey="success" name="Success" stackId="requests" fill="#22c55e" radius={[0, 0, 0, 0]} />
+                <Bar dataKey="failed" name="Failed" stackId="requests" fill="#ef4444" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
         </Card>
       </div>
 
@@ -435,6 +538,32 @@ export default function RequestDetailsTab() {
               </div>
             </div>
             
+            {selectedDetail.response?.error && (
+              <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-red-900 dark:border-red-800 dark:bg-red-950/30 dark:text-red-100 sm:p-4">
+                <div className="flex items-center gap-2 font-semibold text-sm">
+                  <span className="material-symbols-outlined text-[18px]">error</span>
+                  Request failed{selectedDetail.response.status ? ` (HTTP ${selectedDetail.response.status})` : ""}
+                </div>
+                <pre className="mt-2 max-h-[280px] max-w-full overflow-auto whitespace-pre-wrap break-words rounded-lg border border-red-200/60 bg-red-100/40 p-3 font-mono text-xs dark:border-red-800/60 dark:bg-red-950/40">
+                  {formatError(selectedDetail.response.error)}
+                </pre>
+              </div>
+            )}
+
+            {detailLoading && (
+              <div className="flex items-center gap-2 text-sm text-text-muted">
+                <span className="material-symbols-outlined animate-spin text-[18px]">progress_activity</span>
+                Loading request payload…
+              </div>
+            )}
+
+            {selectedDetail.payloadEvicted && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
+                The full request/response bodies for this entry were removed to stay within the
+                storage cap. Only the summary above is available.
+              </div>
+            )}
+
             <div className="space-y-4">
               <CollapsibleSection title="1. Client Request (Input)" defaultOpen={true} icon="input">
                 <pre className="max-h-[300px] max-w-full overflow-auto rounded-lg border border-black/5 bg-black/5 p-3 font-mono text-xs text-text-main dark:border-white/5 dark:bg-white/5 sm:p-4">
