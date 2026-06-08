@@ -13,6 +13,12 @@ const proxyClientMaxBodySize = process.env.NINEROUTER_PROXY_CLIENT_MAX_BODY_SIZE
 const nextConfig = {
   distDir: process.env.NEXT_DIST_DIR || ".next",
   output: "standalone",
+  // Allow LAN / mDNS / Tailscale hosts to load /_next/* dev resources (dev-only).
+  allowedDevOrigins: [
+    "192.168.1.7",
+    "buis-mac-mini.local",
+    "buis-mac-mini.tail86524c.ts.net",
+  ],
   serverExternalPackages: ["better-sqlite3", "sql.js", "node:sqlite", "bun:sqlite"],
   turbopack: {
     root: tracingRoot
