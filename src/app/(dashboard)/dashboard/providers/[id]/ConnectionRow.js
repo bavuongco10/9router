@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import PropTypes from "prop-types";
-import { Badge, Toggle } from "@/shared/components";
+import { Badge, Toggle, ConnectionError } from "@/shared/components";
 import CooldownTimer from "./CooldownTimer";
 
 export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst, isLast, onMoveUp, onMoveDown, onToggleActive, onUpdateProxy, onEdit, onDelete, oneByOneStatus = null }) {
@@ -170,9 +170,7 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
             )}
             {isCooldown && connection.isActive !== false && <CooldownTimer until={modelLockUntil} />}
             {connection.lastError && connection.isActive !== false && (
-              <span className="max-w-full truncate text-xs text-red-500 sm:max-w-[300px]" title={connection.lastError}>
-                {connection.lastError}
-              </span>
+              <ConnectionError error={connection.lastError} errorType={connection.lastErrorType} errorAt={connection.lastErrorAt} />
             )}
             <span className="text-xs text-text-muted">#{connection.priority}</span>
             {connection.globalPriority && (
