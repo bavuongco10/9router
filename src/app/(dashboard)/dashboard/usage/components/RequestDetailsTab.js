@@ -125,7 +125,7 @@ export default function RequestDetailsTab() {
   const [providerNameCache, setProviderNameCache] = useState(null);
   const [stats, setStats] = useState(null);
   // Time-bucket granularity for the "Requests Over Time" chart.
-  const [granularity, setGranularity] = useState("day");
+  const [granularity, setGranularity] = useState("hour");
   const [filters, setFilters] = useState({
     provider: "",
     startDate: "",
