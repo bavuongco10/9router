@@ -6,14 +6,15 @@ WORKDIR /app
 FROM base AS builder
 
 RUN apk --no-cache upgrade && apk --no-cache add python3 make g++ linux-headers
+RUN corepack enable
 
-COPY package.json ./
-RUN --mount=type=cache,target=/root/.npm \
-  npm install
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
+  pnpm install --frozen-lockfile
 
 COPY . ./
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN npm run build
+RUN pnpm run build
 
 FROM ${NODE_IMAGE} AS runner
 WORKDIR /app
