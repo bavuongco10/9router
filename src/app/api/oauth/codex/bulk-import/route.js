@@ -30,11 +30,18 @@ function normalizeCodexAccount(raw) {
       case "access_token": out.accessToken = v; break;
       case "refresh_token": out.refreshToken = v; break;
       case "id_token": out.idToken = v; break;
+      case "token_type": out.tokenType = v; break;
       case "last_refresh": out.lastRefreshAt = toIso(v); break;
       case "expired": out.expiresAt = toIso(v); break;
       case "account_id": psd.chatgptAccountId = v; break;
       case "oai_password": psd.oaiPassword = v; break;
       case "outlook_email": psd.outlookEmail = v; break;
+      // Auxiliary OAuth metadata from the full export — preserved under
+      // providerSpecificData so nothing is lost (camelCase, organized).
+      case "authorization_code": psd.authorizationCode = v; break;
+      case "created_at": psd.oauthCreatedAt = toIso(v) || v; break;
+      case "oauth_start": psd.oauthStart = v; break;
+      case "rt": psd.rt = v; break;
       case "type": break; // provider is forced to "codex" below
       default: out[key] = v; // pass through camelCase + any unknown keys
     }
