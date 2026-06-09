@@ -217,13 +217,16 @@ export async function markAccountUnavailable(connectionId, status, errorText, pr
   }
   if (!shouldFallback) return { shouldFallback: false, cooldownMs: 0 };
 
-  const reason = typeof errorText === "string" ? errorText.slice(0, 100) : "Provider error";
+  // Persist the FULL upstream error so the UI can show it verbatim; keep a
+  // short form only for the concise console/log lines below.
+  const fullError = typeof errorText === "string" ? errorText : "Provider error";
+  const reason = fullError.slice(0, 100);
   const lockUpdate = buildModelLockUpdate(model, cooldownMs);
 
   await updateProviderConnection(connectionId, {
     ...lockUpdate,
     testStatus: "unavailable",
-    lastError: reason,
+    lastError: fullError,
     errorCode: status,
     lastErrorAt: new Date().toISOString(),
     backoffLevel: newBackoffLevel ?? backoffLevel
