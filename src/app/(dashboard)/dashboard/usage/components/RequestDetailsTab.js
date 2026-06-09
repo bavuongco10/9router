@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  LineChart,
+  ComposedChart,
+  Area,
   Line,
   XAxis,
   YAxis,
@@ -16,6 +17,7 @@ import Button from "@/shared/components/Button";
 import Badge from "@/shared/components/Badge";
 import Drawer from "@/shared/components/Drawer";
 import Pagination from "@/shared/components/Pagination";
+import SegmentedControl from "@/shared/components/SegmentedControl";
 import { cn } from "@/shared/utils/cn";
 import { AI_PROVIDERS, getProviderByAlias } from "@/shared/constants/providers";
 
@@ -126,9 +128,6 @@ export default function RequestDetailsTab() {
   const [stats, setStats] = useState(null);
   // Time-bucket granularity for the "Requests Over Time" chart.
   const [granularity, setGranularity] = useState("hour");
-  // Which Y axis/metric the chart shows: "counts" (Total/Success/Failed) or
-  // "rate" (failure rate %). One axis at a time.
-  const [chartMetric, setChartMetric] = useState("counts");
   const [filters, setFilters] = useState({
     provider: "",
     startDate: "",
@@ -355,40 +354,19 @@ export default function RequestDetailsTab() {
         </div>
 
         <Card className="flex min-w-0 flex-col gap-3 p-3 sm:p-4">
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <span className="text-text-muted text-xs uppercase font-semibold">Requests Over Time</span>
-            <div className="flex items-center gap-2">
-              <select
-                aria-label="Chart metric"
-                value={chartMetric}
-                onChange={(e) => setChartMetric(e.target.value)}
-                className={cn(
-                  "h-8 px-2 rounded-lg border border-black/10 dark:border-white/10 bg-surface",
-                  "text-xs text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20",
-                  "cursor-pointer"
-                )}
-                style={{ colorScheme: 'auto' }}
-              >
-                <option value="counts">Counts</option>
-                <option value="rate">Fail rate %</option>
-              </select>
-              <select
-                aria-label="Chart granularity"
-                value={granularity}
-                onChange={(e) => setGranularity(e.target.value)}
-                className={cn(
-                  "h-8 px-2 rounded-lg border border-black/10 dark:border-white/10 bg-surface",
-                  "text-xs text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20",
-                  "cursor-pointer"
-                )}
-                style={{ colorScheme: 'auto' }}
-              >
-                <option value="hour">By Hour</option>
-                <option value="day">By Day</option>
-                <option value="week">By Week</option>
-                <option value="month">By Month</option>
-              </select>
-            </div>
+            <SegmentedControl
+              size="sm"
+              options={[
+                { value: "hour", label: "Hour" },
+                { value: "day", label: "Day" },
+                { value: "week", label: "Week" },
+                { value: "month", label: "Month" },
+              ]}
+              value={granularity}
+              onChange={setGranularity}
+            />
           </div>
           {!stats ? (
             <div className="h-56 flex items-center justify-center text-text-muted text-sm">Loading...</div>
@@ -396,7 +374,17 @@ export default function RequestDetailsTab() {
             <div className="h-56 flex items-center justify-center text-text-muted text-sm">No data for the selected filters</div>
           ) : (
             <ResponsiveContainer width="100%" height={240}>
-              <LineChart data={stats.series} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+              <ComposedChart data={stats.series} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="gradSuccessArea" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#22c55e" stopOpacity={0.35} />
+                    <stop offset="95%" stopColor="#22c55e" stopOpacity={0.05} />
+                  </linearGradient>
+                  <linearGradient id="gradFailedArea" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#ef4444" stopOpacity={0.35} />
+                    <stop offset="95%" stopColor="#ef4444" stopOpacity={0.05} />
+                  </linearGradient>
+                </defs>
                 <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.1} />
                 <XAxis
                   dataKey="date"
@@ -407,13 +395,21 @@ export default function RequestDetailsTab() {
                   minTickGap={24}
                 />
                 <YAxis
-                  domain={chartMetric === "rate" ? [0, "auto"] : undefined}
-                  unit={chartMetric === "rate" ? "%" : undefined}
-                  tick={{ fontSize: 10, fill: chartMetric === "rate" ? "#ef4444" : "currentColor", fillOpacity: chartMetric === "rate" ? 0.8 : 0.5 }}
+                  yAxisId="counts"
+                  tick={{ fontSize: 10, fill: "currentColor", fillOpacity: 0.5 }}
                   tickLine={false}
                   axisLine={false}
-                  allowDecimals={chartMetric === "rate"}
                   width={44}
+                />
+                <YAxis
+                  yAxisId="rate"
+                  orientation="right"
+                  domain={[0, 100]}
+                  unit="%"
+                  tick={{ fontSize: 10, fill: "#f59e0b", fillOpacity: 0.85 }}
+                  tickLine={false}
+                  axisLine={false}
+                  width={40}
                 />
                 <Tooltip
                   contentStyle={{
@@ -425,16 +421,47 @@ export default function RequestDetailsTab() {
                   formatter={(value, name) => (name === "Fail rate" ? [`${value}%`, name] : [value, name])}
                 />
                 <Legend wrapperStyle={{ fontSize: "12px" }} />
-                {chartMetric === "rate" ? (
-                  <Line type="monotone" dataKey="failRate" name="Fail rate" stroke="#ef4444" strokeWidth={2.5} dot={false} />
-                ) : (
-                  <>
-                    <Line type="monotone" dataKey="total" name="Total" stroke="#6366f1" strokeWidth={2} dot={false} />
-                    <Line type="monotone" dataKey="success" name="Success" stroke="#22c55e" strokeWidth={2} dot={false} />
-                    <Line type="monotone" dataKey="failed" name="Failed" stroke="#ef4444" strokeWidth={2} dot={false} />
-                  </>
-                )}
-              </LineChart>
+                {/* Success + Failed stack to reproduce Total on the left axis. */}
+                <Area
+                  yAxisId="counts"
+                  type="monotone"
+                  dataKey="success"
+                  name="Success"
+                  stackId="counts"
+                  stroke="#22c55e"
+                  strokeWidth={1.5}
+                  fill="url(#gradSuccessArea)"
+                />
+                <Area
+                  yAxisId="counts"
+                  type="monotone"
+                  dataKey="failed"
+                  name="Failed"
+                  stackId="counts"
+                  stroke="#ef4444"
+                  strokeWidth={1.5}
+                  fill="url(#gradFailedArea)"
+                />
+                <Line
+                  yAxisId="counts"
+                  type="monotone"
+                  dataKey="total"
+                  name="Total"
+                  stroke="#6366f1"
+                  strokeWidth={2}
+                  dot={false}
+                />
+                <Line
+                  yAxisId="rate"
+                  type="monotone"
+                  dataKey="failRate"
+                  name="Fail rate"
+                  stroke="#f59e0b"
+                  strokeWidth={2}
+                  strokeDasharray="4 3"
+                  dot={false}
+                />
+              </ComposedChart>
             </ResponsiveContainer>
           )}
         </Card>
