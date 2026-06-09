@@ -1,5 +1,6 @@
 import { detectFormat, getTargetFormat } from "../services/provider.js";
 import { translateRequest } from "../translator/index.js";
+import { scrubStaleThinkingBlocks } from "../translator/helpers/claudeHelper.js";
 import { FORMATS } from "../translator/formats.js";
 import { COLORS } from "../utils/stream.js";
 import { createStreamController } from "../utils/streamHandler.js";
@@ -91,6 +92,10 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   if (passthrough) {
     log?.debug?.("PASSTHROUGH", `${clientTool} → ${provider} | native lossless`);
     translatedBody = { ...body, model: upstreamModel };
+    // Heal cross-IDE replays: prepareClaudeRequest is skipped on passthrough,
+    // so strip thinking blocks that carry the pre-#952 placeholder signature
+    // or an obviously-invalid one before they reach Anthropic.
+    scrubStaleThinkingBlocks(translatedBody, provider);
   } else {
     translatedBody = translateRequest(sourceFormat, targetFormat, upstreamModel, body, stream, credentials, provider, reqLogger, stripList, connectionId, clientTool);
     if (!translatedBody) {

@@ -78,6 +78,31 @@ export function fixToolUseOrdering(messages) {
 
 const CLAUDE_FORMAT_PROVIDERS_WITHOUT_OUTPUT_CONFIG = new Set(["minimax", "minimax-cn"]);
 
+// Drop assistant thinking blocks Anthropic will provably reject.
+// Targets the placeholder DEFAULT_THINKING_CLAUDE_SIGNATURE (leftover in
+// client transcripts from pre-#952 9router runs) and obviously-invalid
+// signatures (missing or far shorter than a real one). These typically
+// appear after switching IDEs mid-conversation — e.g. Kiro session
+// resumed in Claude Code — where the persisted history carries signatures
+// that are not valid for the current Anthropic session. Only runs for the
+// real Anthropic upstream; anthropic-compatible providers don't validate
+// signatures, so the placeholder is harmless there.
+export function scrubStaleThinkingBlocks(body, provider) {
+  if (provider !== "claude") return body;
+  if (!body?.messages || !Array.isArray(body.messages)) return body;
+  for (const msg of body.messages) {
+    if (msg.role !== "assistant" || !Array.isArray(msg.content)) continue;
+    msg.content = msg.content.filter(block => {
+      if (block.type !== "thinking" && block.type !== "redacted_thinking") return true;
+      const sig = block.signature;
+      if (typeof sig !== "string" || sig.length < 40) return false;
+      if (sig === DEFAULT_THINKING_CLAUDE_SIGNATURE) return false;
+      return true;
+    });
+  }
+  return body;
+}
+
 // Prepare request for Claude format endpoints
 // - Cleanup cache_control
 // - Filter empty messages
@@ -90,6 +115,8 @@ export function prepareClaudeRequest(body, provider = null, apiKey = null, conne
   if (CLAUDE_FORMAT_PROVIDERS_WITHOUT_OUTPUT_CONFIG.has(provider)) {
     delete body.output_config;
   }
+
+  scrubStaleThinkingBlocks(body, provider);
 
   // 1. System: remove all cache_control, add only to last block with ttl 1h
   if (body.system && Array.isArray(body.system)) {
