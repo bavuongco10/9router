@@ -50,6 +50,9 @@ export default function UsageChart({ period = "7d" }) {
 
   return (
     <Card className="flex min-w-0 flex-col gap-3 p-3 sm:p-4">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-text-muted text-xs uppercase font-semibold">Cost over time</span>
+      </div>
       {loading ? (
         <div className="h-48 flex items-center justify-center text-text-muted text-sm">Loading...</div>
       ) : !hasData ? (

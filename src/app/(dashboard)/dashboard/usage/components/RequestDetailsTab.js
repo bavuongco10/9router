@@ -101,6 +101,36 @@ function getInputTokens(tokens) {
   return prompt < cache ? cache : prompt;
 }
 
+// Convert SQL time buckets (UTC) to browser-local labels.
+// Hour granularity is the most affected — the bucket "2026-06-08T19" reads as
+// 19:00 UTC and must shift to the viewer's local hour.
+function formatBucketTick(value, granularity) {
+  if (!value || typeof value !== "string") return value || "";
+  if (granularity === "hour") {
+    const d = new Date(value + ":00:00Z");
+    if (isNaN(d.getTime())) return value;
+    return String(d.getHours()).padStart(2, "0") + ":00";
+  }
+  return value;
+}
+
+function formatBucketLabel(value, granularity) {
+  if (!value || typeof value !== "string") return value || "";
+  if (granularity === "hour") {
+    const d = new Date(value + ":00:00Z");
+    if (isNaN(d.getTime())) return value;
+    return d.toLocaleString(undefined, {
+      month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false,
+    });
+  }
+  if (granularity === "day") {
+    const d = new Date(value + "T00:00:00Z");
+    if (isNaN(d.getTime())) return value;
+    return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  }
+  return value;
+}
+
 // Failed requests store the upstream error in `response.error`, often as a
 // JSON-encoded string. Pretty-print it when possible so the message is legible.
 function formatError(err) {
@@ -393,6 +423,7 @@ export default function RequestDetailsTab() {
                   axisLine={false}
                   interval="preserveStartEnd"
                   minTickGap={24}
+                  tickFormatter={(v) => formatBucketTick(v, granularity)}
                 />
                 <YAxis
                   yAxisId="counts"
@@ -419,6 +450,7 @@ export default function RequestDetailsTab() {
                     fontSize: "12px",
                   }}
                   formatter={(value, name) => (name === "Fail rate" ? [`${value}%`, name] : [value, name])}
+                  labelFormatter={(v) => formatBucketLabel(v, granularity)}
                 />
                 <Legend wrapperStyle={{ fontSize: "12px" }} />
                 {/* Success + Failed stack to reproduce Total on the left axis. */}
