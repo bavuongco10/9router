@@ -175,6 +175,11 @@ export function openaiResponsesToOpenAIRequest(model, body, stream, credentials)
       .filter(Boolean);
   }
 
+  // Preserve reasoning effort
+  if (body.reasoning?.effort) {
+    result.reasoning_effort = body.reasoning.effort;
+  }
+
   // Cleanup Responses API specific fields
   delete result.input;
   delete result.instructions;

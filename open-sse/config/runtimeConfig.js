@@ -50,6 +50,10 @@ export const STREAM_FIRST_CHUNK_TIMEOUT_MS = envMs("STREAM_FIRST_CHUNK_TIMEOUT_M
 // Default kept at 60s (local override; upstream PR default is 20s). Env: FETCH_CONNECT_TIMEOUT_MS.
 export const FETCH_CONNECT_TIMEOUT_MS = envMs("FETCH_CONNECT_TIMEOUT_MS", 60 * 1000);
 
+// Connect timeout boost specifically for reasoning / thinking models (headers can be delayed minutes).
+// Env: REASONING_CONNECT_TIMEOUT_MS.
+export const REASONING_CONNECT_TIMEOUT_MS = envMs("REASONING_CONNECT_TIMEOUT_MS", 5 * 60 * 1000);
+
 // Default token limits
 export const DEFAULT_MAX_TOKENS = 64000;
 export const DEFAULT_MIN_TOKENS = 32000;
