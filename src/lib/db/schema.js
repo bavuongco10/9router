@@ -1,5 +1,5 @@
 // Latest schema version — bumped when a migration is added in ./migrations/
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -101,6 +101,13 @@ export const TABLES = {
     },
     primaryKey: "PRIMARY KEY (scope, key)",
     indexes: ["CREATE INDEX IF NOT EXISTS idx_kv_scope ON kv(scope)"],
+  },
+  apiKeyRules: {
+    columns: {
+      apiKeyId: "TEXT PRIMARY KEY REFERENCES apiKeys(id) ON DELETE CASCADE",
+      rule: "TEXT NOT NULL",
+      updatedAt: "TEXT NOT NULL",
+    },
   },
   usageHistory: {
     columns: {
