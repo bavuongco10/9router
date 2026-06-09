@@ -2,6 +2,7 @@
 
 ## Fixes
 - Codex: default missing reasoning effort to medium and expose GPT 5.5 effort variants for Claude Code CLI configs (#1417)
+- Fix runtime installs in `~/.9router/runtime` pruning sibling packages. The SQLite (`better-sqlite3`) and tray (`systray2`) lazy installs now save to `package.json` instead of passing `--no-save`, so the second install no longer prunes the first.
 
 # v0.4.71 (2026-06-06)
 
