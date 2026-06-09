@@ -5,6 +5,8 @@ export const APP_CONFIG = {
   name: "9Router Proxy",
   description: "AI Infrastructure Management",
   version: pkg.version,
+  // Short git SHA at build time (NEXT_PUBLIC_COMMIT_HASH). Empty when unset.
+  commitHash: process.env.NEXT_PUBLIC_COMMIT_HASH || "",
 };
 
 // GitHub configuration

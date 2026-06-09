@@ -14,6 +14,9 @@ RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
 
 COPY . ./
 ENV NEXT_TELEMETRY_DISABLED=1
+# Short git SHA injected at build time. Empty when unset → sidebar hides the hash.
+ARG COMMIT_HASH=""
+ENV NEXT_PUBLIC_COMMIT_HASH=$COMMIT_HASH
 RUN pnpm run build
 
 FROM ${NODE_IMAGE} AS runner
