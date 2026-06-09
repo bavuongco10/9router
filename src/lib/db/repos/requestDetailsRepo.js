@@ -130,7 +130,11 @@ async function flushToDatabase() {
       });
 
       // Offload heavy payloads to disk (gzip) outside the DB transaction.
+      // Only FAILED requests keep their full JSON bodies — successes are
+      // recorded as lightweight summary rows (above, for analytics) but don't
+      // need the heavy payload, which would just grow the logs unbounded.
       for (const p of prepared) {
+        if (p.status === "success") continue;
         writePayload(p.id, p.timestamp, p.fullDetail).catch(() => {});
       }
     }

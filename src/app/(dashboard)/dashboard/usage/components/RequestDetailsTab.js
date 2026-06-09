@@ -133,8 +133,9 @@ export default function RequestDetailsTab() {
     provider: "",
     startDate: "",
     endDate: "",
-    // Default to failures — we care about debugging failed requests, not successes.
-    status: "failed"
+    // Default to all statuses. (Only failed requests retain full JSON payloads;
+    // successes still appear here as lightweight summary rows for analytics.)
+    status: ""
   });
 
   const fetchProviders = useCallback(async () => {
