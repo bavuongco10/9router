@@ -801,7 +801,7 @@ export default function APIPageClient({ machineId }) {
   // external tool would see, so users can verify the rule end-to-end without
   // leaving the dashboard.
   const handleCheckModels = async (key) => {
-    setCheckingModelsKey({ id: key.id, name: key.name });
+    setCheckingModelsKey({ id: key.id, name: key.name, key: key.key });
     setCheckModelsResult({ loading: true });
     try {
       const t0 = performance.now();
@@ -1580,7 +1580,7 @@ export default function APIPageClient({ machineId }) {
         onClose={() => { setCheckingModelsKey(null); setCheckModelsResult(null); }}
         size="lg"
       >
-        <CheckModelsResult result={checkModelsResult} />
+        <CheckModelsResult result={checkModelsResult} apiKey={checkingModelsKey?.key} />
       </Modal>
     </div>
   );
@@ -1725,7 +1725,37 @@ function summarizeRule(rule) {
  * rule grants something. The status/timing line proves the server actually
  * answered (vs. a stale dashboard view).
  */
-function CheckModelsResult({ result }) {
+function CheckModelsResult({ result, apiKey }) {
+  const [tests, setTests] = useState({}); // { [modelId]: {loading|ok|error, status, ms, message} }
+
+  const runTest = async (modelId) => {
+    setTests((prev) => ({ ...prev, [modelId]: { loading: true } }));
+    try {
+      const t0 = performance.now();
+      const res = await fetch("/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model: modelId,
+          messages: [{ role: "user", content: "ping" }],
+          max_tokens: 1,
+          stream: false,
+        }),
+      });
+      const ms = Math.round(performance.now() - t0);
+      const text = await res.text();
+      let parsed = null;
+      try { parsed = JSON.parse(text); } catch { /* keep raw text */ }
+      if (!res.ok) {
+        setTests((prev) => ({ ...prev, [modelId]: { error: parsed?.error?.message || text || `HTTP ${res.status}`, status: res.status, ms } }));
+        return;
+      }
+      setTests((prev) => ({ ...prev, [modelId]: { ok: true, status: res.status, ms } }));
+    } catch (err) {
+      setTests((prev) => ({ ...prev, [modelId]: { error: err?.message || "Request failed" } }));
+    }
+  };
+
   if (!result) return null;
   if (result.loading) {
     return (
@@ -1760,9 +1790,44 @@ function CheckModelsResult({ result }) {
           No models. The key has no rule (default-deny) or the rule grants nothing.
         </div>
       ) : (
-        <pre className="max-h-[400px] max-w-full overflow-auto rounded-lg border border-black/5 bg-black/5 p-3 font-mono text-xs text-text-main dark:border-white/5 dark:bg-white/5 sm:p-4">
-          {ids.join("\n")}
-        </pre>
+        <div className="max-h-[400px] max-w-full overflow-auto rounded-lg border border-black/5 bg-black/5 p-1 dark:border-white/5 dark:bg-white/5">
+          <table className="w-full border-collapse text-xs">
+            <tbody className="divide-y divide-border/40">
+              {ids.map((id) => {
+                const t = tests[id];
+                return (
+                  <tr key={id} className="hover:bg-bg-subtle/40">
+                    <td className="px-2 py-1.5 font-mono text-text-main break-all">{id}</td>
+                    <td className="px-2 py-1.5 text-right whitespace-nowrap">
+                      {t?.loading ? (
+                        <span className="text-text-muted inline-flex items-center gap-1">
+                          <span className="material-symbols-outlined animate-spin text-[14px]">progress_activity</span>
+                          Testing…
+                        </span>
+                      ) : t?.ok ? (
+                        <span className="text-success" title={`HTTP ${t.status}`}>✓ {t.ms}ms</span>
+                      ) : t?.error ? (
+                        <span className="text-error truncate inline-block max-w-[220px] align-middle" title={t.error}>
+                          ✗ {t.status ? `HTTP ${t.status}` : ""} {t.ms ? `· ${t.ms}ms` : ""}
+                        </span>
+                      ) : null}
+                    </td>
+                    <td className="px-2 py-1.5 text-right whitespace-nowrap">
+                      <button
+                        type="button"
+                        disabled={!apiKey || t?.loading}
+                        onClick={() => runTest(id)}
+                        className="text-xs font-medium text-primary hover:underline disabled:opacity-50 disabled:no-underline"
+                      >
+                        {t?.ok || t?.error ? "Retest" : "Test"}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );
