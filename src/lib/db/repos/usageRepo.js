@@ -18,12 +18,14 @@ if (!global._statsEmitter) {
 if (!global._pendingTimers) global._pendingTimers = {};
 if (!global._recentRing) global._recentRing = { items: [], initialized: false };
 if (!global._connectionMapCache) global._connectionMapCache = { map: {}, ts: 0 };
+if (!global._apiKeyMapCache) global._apiKeyMapCache = { map: {}, ts: 0 };
 
 const pendingRequests = global._pendingRequests;
 const lastErrorProvider = global._lastErrorProvider;
 const pendingTimers = global._pendingTimers;
 const recentRing = global._recentRing;
 const connCache = global._connectionMapCache;
+const apiKeyCache = global._apiKeyMapCache;
 
 export const statsEmitter = global._statsEmitter;
 
@@ -94,6 +96,19 @@ async function getConnectionMapCached() {
     connCache.ts = Date.now();
   } catch {}
   return connCache.map;
+}
+
+async function getApiKeyMapCached() {
+  if (Date.now() - apiKeyCache.ts < CONN_CACHE_TTL_MS) return apiKeyCache.map;
+  try {
+    const { getApiKeys } = await import("./apiKeysRepo.js");
+    const all = await getApiKeys();
+    const map = {};
+    for (const k of all) if (k.key) map[k.key] = k.name;
+    apiKeyCache.map = map;
+    apiKeyCache.ts = Date.now();
+  } catch {}
+  return apiKeyCache.map;
 }
 
 async function ensureRingInitialized() {
@@ -214,6 +229,7 @@ export async function getActiveRequests() {
   }
 
   await ensureRingInitialized();
+  const apiKeyMap = await getApiKeyMapCached();
   const seen = new Set();
   const recentRequests = [...recentRing.items]
     .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
@@ -224,6 +240,7 @@ export async function getActiveRequests() {
         promptTokens: t.prompt_tokens || t.input_tokens || 0,
         completionTokens: t.completion_tokens || t.output_tokens || 0,
         status: e.status || "ok",
+        keyName: e.apiKey ? (apiKeyMap[e.apiKey] || null) : null,
       };
     })
     .filter((e) => {
@@ -342,7 +359,7 @@ export async function getUsageStats(period = "all") {
   for (const k of allApiKeys) apiKeyMap[k.key] = { name: k.name, id: k.id, createdAt: k.createdAt };
 
   // recentRequests from live history (last 100 entries enough for 20 deduped)
-  const recentRows = db.all(`SELECT timestamp, provider, model, tokens, status FROM usageHistory ORDER BY id DESC LIMIT 100`);
+  const recentRows = db.all(`SELECT timestamp, provider, model, apiKey, tokens, status FROM usageHistory ORDER BY id DESC LIMIT 100`);
   const seen = new Set();
   const recentRequests = recentRows
     .map((r) => {
@@ -352,6 +369,7 @@ export async function getUsageStats(period = "all") {
         promptTokens: t.prompt_tokens || t.input_tokens || 0,
         completionTokens: t.completion_tokens || t.output_tokens || 0,
         status: r.status || "ok",
+        keyName: r.apiKey ? (apiKeyMap[r.apiKey]?.name || null) : null,
       };
     })
     .filter((e) => {
