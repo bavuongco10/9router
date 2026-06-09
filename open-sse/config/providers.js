@@ -26,10 +26,14 @@ const CLAUDE_API_HEADERS = {
   "Anthropic-Beta": "claude-code-20250219,interleaved-thinking-2025-05-14"
 };
 
-// Full Claude CLI fingerprint — required by providers that gate on client identity (e.g. agentrouter)
+// Full Claude CLI fingerprint — required by providers that gate on client identity (e.g. agentrouter).
+// Anthropic-Beta cold-start fallback. We deliberately omit context-management-2025-06-27 here:
+// it is subscription-gated by Anthropic ("The long context beta is not yet available for this
+// subscription") and is meaningless for non-long-context models like Haiku. Real Claude Code
+// clients still get it via claudeHeaderCache — the buildHeaders merge unions cached + static.
 const CLAUDE_CLI_SPOOF_HEADERS = {
   "Anthropic-Version": "2023-06-01",
-  "Anthropic-Beta": "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,prompt-caching-scope-2026-01-05,advanced-tool-use-2025-11-20,effort-2025-11-24,structured-outputs-2025-12-15,fast-mode-2026-02-01,redact-thinking-2026-02-12,token-efficient-tools-2026-03-28",
+  "Anthropic-Beta": "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,prompt-caching-scope-2026-01-05,advanced-tool-use-2025-11-20,effort-2025-11-24,structured-outputs-2025-12-15,fast-mode-2026-02-01,redact-thinking-2026-02-12,token-efficient-tools-2026-03-28",
   "Anthropic-Dangerous-Direct-Browser-Access": "true",
   "User-Agent": "claude-cli/2.1.92 (external, sdk-cli)",
   "X-App": "cli",
