@@ -35,6 +35,7 @@ const INTERNAL_BYPASS_HEADERS = new Set([
   CLI_TOKEN_HEADER,
   MODEL_WHITELIST_BYPASS_HEADER,
   MODEL_WHITELIST_BYPASS_NONCE_HEADER,
+  "x-connection-id-strict",
 ]);
 
 function headersWithoutInternalBypass(headers) {
@@ -205,6 +206,8 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
   // Extract userAgent from request
   const userAgent = request?.headers?.get("user-agent") || "";
   const bypassModelWhitelist = await hasDiagnosticModelTestBypass(request);
+  // Diagnostic per-connection model test: pin to one connection, no fallback.
+  const strictConnectionId = request?.headers?.get("x-connection-id-strict") || null;
 
   // Try with available accounts (fallback on errors)
   const excludeConnectionIds = new Set();
@@ -212,7 +215,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
   let lastStatus = null;
 
   while (true) {
-    const credentials = await getProviderCredentials(provider, excludeConnectionIds, model, { bypassModelWhitelist });
+    const credentials = await getProviderCredentials(provider, excludeConnectionIds, model, { bypassModelWhitelist, strictConnectionId });
 
     // All accounts unavailable
     if (!credentials || credentials.allRateLimited) {

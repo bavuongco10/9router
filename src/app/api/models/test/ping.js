@@ -58,8 +58,13 @@ async function getInternalHeaders() {
   return headers;
 }
 
-export async function pingModelByKind(model, kind, baseUrl = `http://127.0.0.1:${process.env.PORT || UPDATER_CONFIG.appPort}`) {
+export async function pingModelByKind(model, kind, baseUrl = `http://127.0.0.1:${process.env.PORT || UPDATER_CONFIG.appPort}`, options = {}) {
   const headers = await getInternalHeaders();
+  if (options?.connectionId) {
+    // Pins the internal chat/embedding/etc call to a specific provider connection.
+    // Used by the per-connection model-test modal.
+    headers["x-connection-id-strict"] = String(options.connectionId);
+  }
   const start = Date.now();
 
   if (kind === "embedding") {

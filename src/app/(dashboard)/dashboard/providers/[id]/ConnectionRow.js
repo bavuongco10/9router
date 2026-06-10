@@ -5,7 +5,7 @@ import PropTypes from "prop-types";
 import { Badge, Toggle, ConnectionError } from "@/shared/components";
 import CooldownTimer from "./CooldownTimer";
 
-export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst, isLast, onMoveUp, onMoveDown, onToggleActive, onUpdateProxy, onEdit, onReauthorize, onDelete, oneByOneStatus = null }) {
+export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst, isLast, onMoveUp, onMoveDown, onToggleActive, onUpdateProxy, onEdit, onReauthorize, onDelete, onTestModel, oneByOneStatus = null }) {
   const [showProxyDropdown, setShowProxyDropdown] = useState(false);
   const [updatingProxy, setUpdatingProxy] = useState(false);
   const proxyDropdownRef = useRef(null);
@@ -202,7 +202,14 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
         </div>
       </div>
       <div className="flex w-full items-center justify-between gap-2 sm:w-auto sm:justify-end">
-        <div className={`grid flex-1 ${isOAuthConnection && onReauthorize ? "grid-cols-4" : "grid-cols-3"} gap-1 sm:flex sm:flex-none`}>
+        {(() => {
+          const cols = 2 /* Edit + Delete */
+            + ((proxyPools || []).length > 0 ? 1 : 0)
+            + (isOAuthConnection && onReauthorize ? 1 : 0)
+            + (onTestModel ? 1 : 0);
+          const gridColsClass = { 2: "grid-cols-2", 3: "grid-cols-3", 4: "grid-cols-4", 5: "grid-cols-5" }[cols] || "grid-cols-5";
+          return (
+        <div className={`grid flex-1 ${gridColsClass} gap-1 sm:flex sm:flex-none`}>
           {/* Proxy button with inline dropdown */}
           {(proxyPools || []).length > 0 && (
             <div className="relative" ref={proxyDropdownRef}>
@@ -251,11 +258,23 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
               <span className="text-[10px] leading-tight">Re-authorize</span>
             </button>
           )}
+          {onTestModel && (
+            <button
+              onClick={onTestModel}
+              className="flex flex-col items-center rounded px-2 py-1 text-text-muted hover:bg-black/5 hover:text-primary dark:hover:bg-white/5"
+              title="Test a model through this connection"
+            >
+              <span className="material-symbols-outlined text-[18px]">science</span>
+              <span className="text-[10px] leading-tight">Test</span>
+            </button>
+          )}
           <button onClick={onDelete} className="flex flex-col items-center rounded px-2 py-1 text-red-500 hover:bg-red-500/10">
             <span className="material-symbols-outlined text-[18px]">delete</span>
             <span className="text-[10px] leading-tight">Delete</span>
           </button>
         </div>
+          );
+        })()}
         <Toggle
           size="sm"
           checked={connection.isActive ?? true}
@@ -297,6 +316,7 @@ ConnectionRow.propTypes = {
   onEdit: PropTypes.func.isRequired,
   onReauthorize: PropTypes.func,
   onDelete: PropTypes.func.isRequired,
+  onTestModel: PropTypes.func,
   oneByOneStatus: PropTypes.shape({
     state: PropTypes.string,
     error: PropTypes.string,

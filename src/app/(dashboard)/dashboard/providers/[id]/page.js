@@ -14,6 +14,7 @@ import ModelRow from "./ModelRow";
 import PassthroughModelsSection from "./PassthroughModelsSection";
 import CompatibleModelsSection from "./CompatibleModelsSection";
 import ConnectionRow from "./ConnectionRow";
+import TestConnectionModelModal from "./TestConnectionModelModal";
 import AddApiKeyModal from "./AddApiKeyModal";
 import EditCompatibleNodeModal from "./EditCompatibleNodeModal";
 import AddCustomModelModal from "./AddCustomModelModal";
@@ -42,6 +43,8 @@ export default function ProviderDetailPage() {
   const [addConnectionError, setAddConnectionError] = useState("");
   const [showBulkImportCodex, setShowBulkImportCodex] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [showTestModelModal, setShowTestModelModal] = useState(false);
+  const [testModelConnectionId, setTestModelConnectionId] = useState(null);
   const [showEditNodeModal, setShowEditNodeModal] = useState(false);
   const [showBulkProxyModal, setShowBulkProxyModal] = useState(false);
   const [selectedConnection, setSelectedConnection] = useState(null);
@@ -829,6 +832,10 @@ export default function ProviderDetailPage() {
                 }}
                 onReauthorize={isOAuth ? () => handleReauthorizeConnection(conn.id) : undefined}
                 onDelete={() => handleDelete(conn.id)}
+                onTestModel={() => {
+                  setTestModelConnectionId(conn.id);
+                  setShowTestModelModal(true);
+                }}
                 oneByOneStatus={oneByOneResults[conn.id] || null}
               />
             </div>
@@ -1555,6 +1562,13 @@ export default function ProviderDetailPage() {
         proxyPools={proxyPools}
         onSave={handleUpdateConnection}
         onClose={() => setShowEditModal(false)}
+      />
+      <TestConnectionModelModal
+        isOpen={showTestModelModal}
+        onClose={() => setShowTestModelModal(false)}
+        connections={connections}
+        initialConnectionId={testModelConnectionId}
+        providerStorageAlias={providerStorageAlias}
       />
       {isCompatible && (
         <EditCompatibleNodeModal

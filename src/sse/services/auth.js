@@ -45,6 +45,7 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
     ? excludeConnectionIds
     : (excludeConnectionIds ? new Set([excludeConnectionIds]) : new Set());
   const preferredConnectionId = options?.preferredConnectionId || null;
+  const strictConnectionId = options?.strictConnectionId || null;
   const bypassModelWhitelist = options?.bypassModelWhitelist === true;
   // Acquire mutex to prevent race conditions
   const currentMutex = selectionMutex;
@@ -83,6 +84,49 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
     if (connections.length === 0) {
       log.warn("AUTH", `No credentials for ${provider}`);
       return null;
+    }
+
+    // Strict-pin path: caller (e.g. diagnostic test) demands this exact connection.
+    // Bypass exclude/lock/whitelist filtering and never fall back. Used by the
+    // per-connection model-test modal so the result reflects the chosen connection.
+    if (strictConnectionId) {
+      const pinned = connections.find((c) => c.id === strictConnectionId);
+      if (!pinned) {
+        log.warn("AUTH", `${provider} | strict pin ${strictConnectionId} not found or inactive`);
+        return null;
+      }
+      // Strict means no fallback: once excluded (e.g. previous attempt failed), stop.
+      if (excludeSet.has(pinned.id)) {
+        log.warn("AUTH", `${provider} | strict pin ${strictConnectionId} already attempted`);
+        return null;
+      }
+      log.info("AUTH", `${provider} | strict-pinned to ${pinned.id?.slice(0, 8)} (${pinned.name || pinned.email || "unnamed"})`);
+      const pinnedProxy = await resolveConnectionProxyConfig(pinned.providerSpecificData || {});
+      return {
+        authType: pinned.authType,
+        apiKey: pinned.apiKey,
+        accessToken: pinned.accessToken,
+        refreshToken: pinned.refreshToken,
+        idToken: pinned.idToken,
+        expiresAt: pinned.expiresAt,
+        expiresIn: pinned.expiresIn,
+        lastRefreshAt: pinned.lastRefreshAt,
+        projectId: pinned.projectId,
+        connectionName: pinned.displayName || pinned.name || pinned.email || pinned.id,
+        copilotToken: pinned.providerSpecificData?.copilotToken,
+        providerSpecificData: {
+          ...(pinned.providerSpecificData || {}),
+          connectionProxyEnabled: pinnedProxy.connectionProxyEnabled,
+          connectionProxyUrl: pinnedProxy.connectionProxyUrl,
+          connectionNoProxy: pinnedProxy.connectionNoProxy,
+          connectionProxyPoolId: pinnedProxy.proxyPoolId || null,
+          vercelRelayUrl: pinnedProxy.vercelRelayUrl || "",
+        },
+        connectionId: pinned.id,
+        testStatus: pinned.testStatus,
+        lastError: pinned.lastError,
+        _connection: pinned,
+      };
     }
 
     // Filter out excluded, model-locked, and whitelist-mismatched connections
