@@ -14,6 +14,7 @@ export default function TestConnectionModelModal({
   connections,
   initialConnectionId,
   providerStorageAlias,
+  fallbackModels = [],
 }) {
   const [selectedConnectionId, setSelectedConnectionId] = useState(initialConnectionId || "");
   const [model, setModel] = useState("");
@@ -74,14 +75,29 @@ export default function TestConnectionModelModal({
     [connections]
   );
 
-  const modelIds = useMemo(() => {
+  const liveModelIds = useMemo(() => {
     const ids = new Set();
     for (const m of models) {
       const id = m?.id || m?.name || m?.model;
       if (id) ids.add(String(id));
     }
-    return [...ids];
+    return ids;
   }, [models]);
+
+  const fallbackModelIds = useMemo(() => {
+    const ids = new Set();
+    for (const m of fallbackModels || []) {
+      const id = m?.id || m?.name || m?.model;
+      if (id) ids.add(String(id));
+    }
+    return ids;
+  }, [fallbackModels]);
+
+  // Union of live + static so the user can pick even when the live fetch 401s
+  // on an expired OAuth token.
+  const modelIds = useMemo(() => {
+    return [...new Set([...liveModelIds, ...fallbackModelIds])];
+  }, [liveModelIds, fallbackModelIds]);
 
   const handleTest = async () => {
     if (!selectedConnectionId || !model.trim() || testing) return;
@@ -160,13 +176,27 @@ export default function TestConnectionModelModal({
             ))}
           </datalist>
           <p className="text-xs text-text-muted">
-            {modelsError
-              ? `Could not load model list (${modelsError}). You can still type a model id.`
-              : modelIds.length > 0
-                ? `${modelIds.length} model${modelIds.length === 1 ? "" : "s"} fetched from this connection. Free-text also accepted.`
-                : loadingModels
-                  ? " "
-                  : "No model list available for this connection — type a model id."}
+            {(() => {
+              const live = liveModelIds.size;
+              const fallback = fallbackModelIds.size;
+              if (loadingModels && live === 0) return " ";
+              if (modelsError && live === 0 && fallback > 0) {
+                return `Live model list unavailable (${modelsError}). Showing ${fallback} model${fallback === 1 ? "" : "s"} from the static catalog. Free-text also accepted.`;
+              }
+              if (modelsError && live === 0) {
+                return `Could not load model list (${modelsError}). You can still type a model id.`;
+              }
+              if (live > 0 && fallback > 0) {
+                return `${live} live + ${modelIds.length - live} catalog model${modelIds.length - live === 1 ? "" : "s"}. Free-text also accepted.`;
+              }
+              if (live > 0) {
+                return `${live} model${live === 1 ? "" : "s"} fetched from this connection. Free-text also accepted.`;
+              }
+              if (fallback > 0) {
+                return `${fallback} model${fallback === 1 ? "" : "s"} from the static catalog. Free-text also accepted.`;
+              }
+              return "No model list available for this connection — type a model id.";
+            })()}
           </p>
         </div>
 
