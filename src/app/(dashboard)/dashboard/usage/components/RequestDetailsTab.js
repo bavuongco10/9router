@@ -405,16 +405,6 @@ export default function RequestDetailsTab() {
           ) : (
             <ResponsiveContainer width="100%" height={240}>
               <ComposedChart data={stats.series} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="gradSuccessArea" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#22c55e" stopOpacity={0.35} />
-                    <stop offset="95%" stopColor="#22c55e" stopOpacity={0.05} />
-                  </linearGradient>
-                  <linearGradient id="gradFailedArea" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#ef4444" stopOpacity={0.35} />
-                    <stop offset="95%" stopColor="#ef4444" stopOpacity={0.05} />
-                  </linearGradient>
-                </defs>
                 <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.1} />
                 <XAxis
                   dataKey="date"
@@ -437,7 +427,7 @@ export default function RequestDetailsTab() {
                   orientation="right"
                   domain={[0, 100]}
                   unit="%"
-                  tick={{ fontSize: 10, fill: "#f59e0b", fillOpacity: 0.85 }}
+                  tick={{ fontSize: 10, fill: "#ef4444", fillOpacity: 0.85 }}
                   tickLine={false}
                   axisLine={false}
                   width={40}
@@ -460,9 +450,10 @@ export default function RequestDetailsTab() {
                   dataKey="success"
                   name="Success"
                   stackId="counts"
-                  stroke="#22c55e"
-                  strokeWidth={1.5}
-                  fill="url(#gradSuccessArea)"
+                  stroke="none"
+                  fill="#22c55e"
+                  fillOpacity={0.45}
+                  legendType="square"
                 />
                 <Area
                   yAxisId="counts"
@@ -470,9 +461,10 @@ export default function RequestDetailsTab() {
                   dataKey="failed"
                   name="Failed"
                   stackId="counts"
-                  stroke="#ef4444"
-                  strokeWidth={1.5}
-                  fill="url(#gradFailedArea)"
+                  stroke="none"
+                  fill="#ef4444"
+                  fillOpacity={0.45}
+                  legendType="square"
                 />
                 <Line
                   yAxisId="counts"
@@ -488,7 +480,7 @@ export default function RequestDetailsTab() {
                   type="monotone"
                   dataKey="failRate"
                   name="Fail rate"
-                  stroke="#f59e0b"
+                  stroke="#ef4444"
                   strokeWidth={2}
                   strokeDasharray="4 3"
                   dot={false}
