@@ -1569,6 +1569,7 @@ export default function ProviderDetailPage() {
         connections={connections}
         initialConnectionId={testModelConnectionId}
         providerStorageAlias={providerStorageAlias}
+        providerDisplayAlias={providerDisplayAlias}
         fallbackModels={models}
       />
       {isCompatible && (
