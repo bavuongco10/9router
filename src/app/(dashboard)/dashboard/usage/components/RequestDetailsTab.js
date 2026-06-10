@@ -405,6 +405,16 @@ export default function RequestDetailsTab() {
           ) : (
             <ResponsiveContainer width="100%" height={240}>
               <ComposedChart data={stats.series} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="gradSuccessArea" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#22c55e" stopOpacity={0.45} />
+                    <stop offset="95%" stopColor="#22c55e" stopOpacity={0.05} />
+                  </linearGradient>
+                  <linearGradient id="gradFailedArea" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#ef4444" stopOpacity={0.45} />
+                    <stop offset="95%" stopColor="#ef4444" stopOpacity={0.05} />
+                  </linearGradient>
+                </defs>
                 <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.1} />
                 <XAxis
                   dataKey="date"
@@ -442,7 +452,15 @@ export default function RequestDetailsTab() {
                   formatter={(value, name) => (name === "Fail rate" ? [`${value}%`, name] : [value, name])}
                   labelFormatter={(v) => formatBucketLabel(v, granularity)}
                 />
-                <Legend wrapperStyle={{ fontSize: "12px" }} />
+                <Legend
+                  wrapperStyle={{ fontSize: "12px" }}
+                  payload={[
+                    { value: "Success", type: "square", color: "#22c55e", id: "success" },
+                    { value: "Failed", type: "square", color: "#ef4444", id: "failed" },
+                    { value: "Total", type: "line", color: "#6366f1", id: "total" },
+                    { value: "Fail rate", type: "line", color: "#ef4444", id: "failRate" },
+                  ]}
+                />
                 {/* Success + Failed stack to reproduce Total on the left axis. */}
                 <Area
                   yAxisId="counts"
@@ -451,9 +469,7 @@ export default function RequestDetailsTab() {
                   name="Success"
                   stackId="counts"
                   stroke="none"
-                  fill="#22c55e"
-                  fillOpacity={0.45}
-                  legendType="square"
+                  fill="url(#gradSuccessArea)"
                 />
                 <Area
                   yAxisId="counts"
@@ -462,9 +478,7 @@ export default function RequestDetailsTab() {
                   name="Failed"
                   stackId="counts"
                   stroke="none"
-                  fill="#ef4444"
-                  fillOpacity={0.45}
-                  legendType="square"
+                  fill="url(#gradFailedArea)"
                 />
                 <Line
                   yAxisId="counts"
