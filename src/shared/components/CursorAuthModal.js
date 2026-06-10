@@ -209,4 +209,8 @@ CursorAuthModal.propTypes = {
   isOpen: PropTypes.bool.isRequired,
   onSuccess: PropTypes.func,
   onClose: PropTypes.func.isRequired,
+  // Accepted for parity with OAuthModal so the re-authorize state can be
+  // passed from the parent; Cursor's import endpoints currently always
+  // create a fresh row, so the value is intentionally unused for now.
+  connectionId: PropTypes.string,
 };

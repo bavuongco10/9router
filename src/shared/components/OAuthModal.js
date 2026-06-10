@@ -10,7 +10,7 @@ import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
  * - Localhost: Auto callback via popup message
  * - Remote: Manual paste callback URL
  */
-export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, onClose, oauthMeta, idcConfig }) {
+export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, onClose, oauthMeta, idcConfig, connectionId }) {
   const [step, setStep] = useState("waiting"); // waiting | input | success | error
   const [authData, setAuthData] = useState(null);
   const [callbackUrl, setCallbackUrl] = useState("");
@@ -52,6 +52,7 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
           codeVerifier: authData.codeVerifier,
           state,
           ...(oauthMeta ? { meta: oauthMeta } : {}),
+          ...(connectionId ? { connectionId } : {}),
         }),
       });
 
@@ -64,7 +65,7 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
       setError(err.message);
       setStep("error");
     }
-  }, [authData, provider, onSuccess]);
+  }, [authData, provider, onSuccess, oauthMeta, connectionId]);
 
   const completeXaiManualCode = useCallback(async (code) => {
     if (!authData?.state) return;
@@ -116,7 +117,7 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
         const res = await fetch(`/api/oauth/${provider}/poll`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ deviceCode, codeVerifier, extraData }),
+          body: JSON.stringify({ deviceCode, codeVerifier, extraData, ...(connectionId ? { connectionId } : {}) }),
         });
 
         const data = await res.json();
@@ -147,7 +148,7 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
     setError("Authorization timeout");
     setStep("error");
     setPolling(false);
-  }, [provider, onSuccess]);
+  }, [provider, onSuccess, connectionId]);
 
   // Start OAuth flow
   const startOAuthFlow = useCallback(async () => {
@@ -679,4 +680,7 @@ OAuthModal.propTypes = {
     startUrl: PropTypes.string,
     region: PropTypes.string,
   }),
+  /** When set, the OAuth flow refreshes tokens on this existing connection
+   *  instead of inserting a new one (re-authorize action). */
+  connectionId: PropTypes.string,
 };

@@ -191,4 +191,8 @@ GitLabAuthModal.propTypes = {
   providerInfo: PropTypes.shape({ name: PropTypes.string }),
   onSuccess: PropTypes.func,
   onClose: PropTypes.func.isRequired,
+  // Accepted for parity with OAuthModal so the re-authorize state can be
+  // passed from the parent; GitLab's import endpoints currently always
+  // create a fresh row, so the value is intentionally unused for now.
+  connectionId: PropTypes.string,
 };

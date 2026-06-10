@@ -6,7 +6,38 @@ import {
   requestDeviceCode, 
   pollForToken 
 } from "@/lib/oauth/providers";
-import { createProviderConnection } from "@/models";
+import { createProviderConnection, updateProviderConnection, getProviderConnectionById } from "@/models";
+
+// Re-authorize path: refresh the tokens on an existing connection instead of
+// inserting a duplicate. Email-based dedup in createProviderConnection isn't
+// reliable across providers (qoder synthesizes one, several don't return any),
+// so the client explicitly hands us the connection ID it wants to refresh.
+async function applyReauthorize(connectionId, provider, tokenData) {
+  const existing = await getProviderConnectionById(connectionId);
+  if (!existing) return null;
+  if (existing.provider !== provider) return null;
+
+  const mergedProviderSpecific = {
+    ...(existing.providerSpecificData || {}),
+    ...(tokenData.providerSpecificData || {}),
+  };
+  const expiresAt = tokenData.expiresIn
+    ? new Date(Date.now() + tokenData.expiresIn * 1000).toISOString()
+    : null;
+
+  const updateData = {
+    ...tokenData,
+    authType: "oauth",
+    providerSpecificData: mergedProviderSpecific,
+    expiresAt,
+    testStatus: "active",
+    // Clear stale failure state so the row immediately reflects the new auth.
+    lastError: null,
+    lastErrorType: null,
+    lastErrorAt: null,
+  };
+  return updateProviderConnection(connectionId, updateData);
+}
 import {
   startCodexProxy,
   stopCodexProxy,
@@ -188,7 +219,7 @@ export async function POST(request, { params }) {
     }
 
     if (action === "exchange") {
-      const { code, redirectUri, codeVerifier, state, meta } = body;
+      const { code, redirectUri, codeVerifier, state, meta, connectionId } = body;
 
       // Detect if "code" is actually a raw JWT access token (starts with eyJ)
       if (code && code.startsWith("eyJ") && code.includes(".")) {
@@ -242,15 +273,21 @@ export async function POST(request, { params }) {
       const tokenData = await exchangeTokens(provider, code, redirectUri, codeVerifier, state, meta);
 
       // Save to database
-      const connection = await createProviderConnection({
-        provider,
-        authType: "oauth",
-        ...tokenData,
-        expiresAt: tokenData.expiresIn 
-          ? new Date(Date.now() + tokenData.expiresIn * 1000).toISOString() 
-          : null,
-        testStatus: "active",
-      });
+      let connection;
+      if (connectionId) {
+        connection = await applyReauthorize(connectionId, provider, tokenData);
+      }
+      if (!connection) {
+        connection = await createProviderConnection({
+          provider,
+          authType: "oauth",
+          ...tokenData,
+          expiresAt: tokenData.expiresIn
+            ? new Date(Date.now() + tokenData.expiresIn * 1000).toISOString()
+            : null,
+          testStatus: "active",
+        });
+      }
 
       return NextResponse.json({ 
         success: true, 
@@ -264,7 +301,7 @@ export async function POST(request, { params }) {
     }
 
     if (action === "poll") {
-      const { deviceCode, codeVerifier, extraData } = body;
+      const { deviceCode, codeVerifier, extraData, connectionId } = body;
 
       if (!deviceCode) {
         return NextResponse.json({ error: "Missing device code" }, { status: 400 });
@@ -296,18 +333,24 @@ export async function POST(request, { params }) {
 
       if (result.success) {
         // Save to database
-        const connection = await createProviderConnection({
-          provider,
-          authType: "oauth",
-          ...result.tokens,
-          expiresAt: result.tokens.expiresIn 
-            ? new Date(Date.now() + result.tokens.expiresIn * 1000).toISOString() 
-            : null,
-          testStatus: "active",
-        });
+        let connection;
+        if (connectionId) {
+          connection = await applyReauthorize(connectionId, provider, result.tokens);
+        }
+        if (!connection) {
+          connection = await createProviderConnection({
+            provider,
+            authType: "oauth",
+            ...result.tokens,
+            expiresAt: result.tokens.expiresIn
+              ? new Date(Date.now() + result.tokens.expiresIn * 1000).toISOString()
+              : null,
+            testStatus: "active",
+          });
+        }
 
-        return NextResponse.json({ 
-          success: true, 
+        return NextResponse.json({
+          success: true,
           connection: {
             id: connection.id,
             provider: connection.provider,
