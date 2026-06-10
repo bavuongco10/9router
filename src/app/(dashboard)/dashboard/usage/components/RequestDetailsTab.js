@@ -454,12 +454,38 @@ export default function RequestDetailsTab() {
                 />
                 <Legend
                   wrapperStyle={{ fontSize: "12px" }}
-                  payload={[
-                    { value: "Success", type: "square", color: "#22c55e", id: "success" },
-                    { value: "Failed", type: "square", color: "#ef4444", id: "failed" },
-                    { value: "Total", type: "line", color: "#6366f1", id: "total" },
-                    { value: "Fail rate", type: "line", color: "#ef4444", id: "failRate" },
-                  ]}
+                  content={() => (
+                    <ul className="flex flex-wrap items-center justify-center gap-4 text-text-muted text-xs">
+                      {[
+                        { label: "Success", color: "#22c55e", marker: "block" },
+                        { label: "Failed", color: "#ef4444", marker: "block" },
+                        { label: "Total", color: "#6366f1", marker: "line" },
+                        { label: "Fail rate", color: "#ef4444", marker: "line", dashed: true },
+                      ].map((it) => (
+                        <li key={it.label} className="flex items-center gap-1.5">
+                          {it.marker === "block" ? (
+                            <span
+                              aria-hidden="true"
+                              className="inline-block h-3 w-3 rounded-sm"
+                              style={{ backgroundColor: it.color }}
+                            />
+                          ) : (
+                            <span
+                              aria-hidden="true"
+                              className="inline-block h-0.5 w-4"
+                              style={{
+                                backgroundColor: it.color,
+                                backgroundImage: it.dashed
+                                  ? `repeating-linear-gradient(90deg, ${it.color} 0 4px, transparent 4px 7px)`
+                                  : undefined,
+                              }}
+                            />
+                          )}
+                          <span>{it.label}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 />
                 {/* Success + Failed stack to reproduce Total on the left axis. */}
                 <Area
