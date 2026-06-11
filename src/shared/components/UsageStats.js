@@ -37,12 +37,125 @@ function TimeAgo({ timestamp }) {
   return <>{timeAgo(timestamp)}</>;
 }
 
+const RECENT_COLUMNS = [
+  { key: "status", label: "Status", align: "left", width: "w-2" },
+  { key: "model", label: "Model", align: "left" },
+  { key: "provider", label: "Provider", align: "left" },
+  { key: "account", label: "Account", align: "left" },
+  { key: "keyName", label: "API Key", align: "left" },
+  { key: "tokens", label: "In / Out", align: "right" },
+  { key: "endpoint", label: "Endpoint", align: "left" },
+  { key: "when", label: "When", align: "right" },
+];
+const DEFAULT_RECENT_COLS = ["status", "model", "account", "keyName", "tokens", "when"];
+const RECENT_COLS_STORAGE_KEY = "9router.recentRequests.columns.v1";
+
+function loadRecentCols() {
+  if (typeof window === "undefined") return DEFAULT_RECENT_COLS;
+  try {
+    const raw = window.localStorage.getItem(RECENT_COLS_STORAGE_KEY);
+    if (!raw) return DEFAULT_RECENT_COLS;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed) || !parsed.length) return DEFAULT_RECENT_COLS;
+    const valid = RECENT_COLUMNS.map((c) => c.key);
+    const filtered = parsed.filter((k) => valid.includes(k));
+    return filtered.length ? filtered : DEFAULT_RECENT_COLS;
+  } catch {
+    return DEFAULT_RECENT_COLS;
+  }
+}
+
 function RecentRequests({ requests = [] }) {
+  const [cols, setCols] = useState(DEFAULT_RECENT_COLS);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const pickerRef = useRef(null);
+
+  useEffect(() => { setCols(loadRecentCols()); }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try { window.localStorage.setItem(RECENT_COLS_STORAGE_KEY, JSON.stringify(cols)); } catch {}
+  }, [cols]);
+
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const onClick = (e) => {
+      if (pickerRef.current && !pickerRef.current.contains(e.target)) setPickerOpen(false);
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [pickerOpen]);
+
+  const toggleCol = useCallback((key) => {
+    setCols((prev) => {
+      const next = prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key];
+      if (!next.length) return prev;
+      return RECENT_COLUMNS.map((c) => c.key).filter((k) => next.includes(k));
+    });
+  }, []);
+
+  const visible = RECENT_COLUMNS.filter((c) => cols.includes(c.key));
+
+  const renderCell = (col, r) => {
+    const ok = !r.status || r.status === "ok" || r.status === "success";
+    switch (col.key) {
+      case "status":
+        return <span className={`block w-1.5 h-1.5 rounded-full ${ok ? "bg-success" : "bg-error"}`} />;
+      case "model":
+        return <span className="font-mono truncate max-w-[120px] inline-block align-middle" title={r.model}>{r.model}</span>;
+      case "provider":
+        return <span className="text-text-muted truncate max-w-[100px] inline-block align-middle" title={r.provider || ""}>{r.provider || "—"}</span>;
+      case "account":
+        return <span className="text-text-muted truncate max-w-[140px] inline-block align-middle" title={r.account || ""}>{r.account || "—"}</span>;
+      case "keyName":
+        return <span className="text-text-muted truncate max-w-[120px] inline-block align-middle" title={r.keyName || ""}>{r.keyName || "—"}</span>;
+      case "tokens":
+        return (
+          <span className="whitespace-nowrap">
+            <span className="text-primary">{fmt(r.promptTokens)}↑</span>
+            {" "}
+            <span className="text-success">{fmt(r.completionTokens)}↓</span>
+          </span>
+        );
+      case "endpoint":
+        return <span className="text-text-muted font-mono truncate max-w-[160px] inline-block align-middle" title={r.endpoint || ""}>{r.endpoint || "—"}</span>;
+      case "when":
+        return <span className="text-text-muted whitespace-nowrap"><TimeAgo timestamp={r.timestamp} /></span>;
+      default:
+        return null;
+    }
+  };
+
   return (
     <Card className="flex min-w-0 flex-col overflow-hidden" padding="sm" style={{ height: 480 }}>
       {/* Header */}
-      <div className="px-1 py-2 border-b border-border shrink-0">
+      <div className="px-1 py-2 border-b border-border shrink-0 flex items-center justify-between">
         <span className="text-xs font-semibold text-text-muted uppercase tracking-wide">Recent Requests</span>
+        <div className="relative" ref={pickerRef}>
+          <button
+            type="button"
+            onClick={() => setPickerOpen((o) => !o)}
+            className="text-xs text-text-muted hover:text-text px-1.5 py-0.5 rounded border border-border hover:border-text-muted transition-colors"
+            title="Choose columns"
+          >
+            Columns ({visible.length})
+          </button>
+          {pickerOpen && (
+            <div className="absolute right-0 top-full mt-1 z-20 bg-bg border border-border rounded shadow-lg min-w-[160px] py-1">
+              {RECENT_COLUMNS.map((c) => (
+                <label key={c.key} className="flex items-center gap-2 px-2 py-1 text-xs hover:bg-bg-subtle cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={cols.includes(c.key)}
+                    onChange={() => toggleCol(c.key)}
+                    className="cursor-pointer"
+                  />
+                  <span>{c.label}</span>
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {!requests.length ? (
@@ -52,32 +165,29 @@ function RecentRequests({ requests = [] }) {
           <table className="w-full min-w-[300px] border-collapse text-xs">
             <thead className="sticky top-0 bg-bg z-10">
               <tr className="border-b border-border">
-                <th className="py-1.5 text-left font-semibold text-text-muted w-2"></th>
-                <th className="py-1.5 text-left font-semibold text-text-muted">Model</th>
-                <th className="py-1.5 text-left font-semibold text-text-muted">API Key</th>
-                <th className="py-1.5 text-right font-semibold text-text-muted whitespace-nowrap">In / Out</th>
-                <th className="py-1.5 text-right font-semibold text-text-muted">When</th>
+                {visible.map((c) => (
+                  <th
+                    key={c.key}
+                    className={`py-1.5 font-semibold text-text-muted ${c.align === "right" ? "text-right" : "text-left"} ${c.width || ""} ${c.key === "tokens" ? "whitespace-nowrap" : ""}`}
+                  >
+                    {c.key === "status" ? "" : c.label}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-border/50">
-              {requests.map((r, i) => {
-                const ok = !r.status || r.status === "ok" || r.status === "success";
-                return (
-                  <tr key={i} className="hover:bg-bg-subtle transition-colors">
-                    <td className="py-1.5">
-                      <span className={`block w-1.5 h-1.5 rounded-full ${ok ? "bg-success" : "bg-error"}`} />
+              {requests.map((r, i) => (
+                <tr key={i} className="hover:bg-bg-subtle transition-colors">
+                  {visible.map((c) => (
+                    <td
+                      key={c.key}
+                      className={`py-1.5 ${c.align === "right" ? "text-right" : ""} ${c.key === "tokens" || c.key === "when" ? "whitespace-nowrap" : ""}`}
+                    >
+                      {renderCell(c, r)}
                     </td>
-                    <td className="py-1.5 font-mono truncate max-w-[120px]" title={r.model}>{r.model}</td>
-                    <td className="py-1.5 truncate max-w-[120px] text-text-muted" title={r.keyName || ""}>{r.keyName || "—"}</td>
-                    <td className="py-1.5 text-right whitespace-nowrap">
-                      <span className="text-primary">{fmt(r.promptTokens)}↑</span>
-                      {" "}
-                      <span className="text-success">{fmt(r.completionTokens)}↓</span>
-                    </td>
-                    <td className="py-1.5 text-right text-text-muted whitespace-nowrap"><TimeAgo timestamp={r.timestamp} /></td>
-                  </tr>
-                );
-              })}
+                  ))}
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>

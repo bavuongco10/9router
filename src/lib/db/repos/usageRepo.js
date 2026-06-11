@@ -235,12 +235,19 @@ export async function getActiveRequests() {
     .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
     .map((e) => {
       const t = e.tokens || {};
+      const connectionId = e.connectionId || null;
+      const account = connectionId
+        ? (connectionMap[connectionId] || `Account ${String(connectionId).slice(0, 8)}...`)
+        : null;
       return {
         timestamp: e.timestamp, model: e.model, provider: e.provider || "",
         promptTokens: t.prompt_tokens || t.input_tokens || 0,
         completionTokens: t.completion_tokens || t.output_tokens || 0,
         status: e.status || "ok",
         keyName: e.apiKey ? (apiKeyMap[e.apiKey] || null) : null,
+        connectionId,
+        account,
+        endpoint: e.endpoint || null,
       };
     })
     .filter((e) => {
