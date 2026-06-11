@@ -160,12 +160,14 @@ export default function RequestDetailsTab() {
   const [granularity, setGranularity] = useState("hour");
   const [filters, setFilters] = useState({
     provider: "",
+    connectionId: "",
     startDate: "",
     endDate: "",
     // Default to all statuses. (Only failed requests retain full JSON payloads;
     // successes still appear here as lightweight summary rows for analytics.)
     status: ""
   });
+  const [connections, setConnections] = useState([]);
 
   const fetchProviders = useCallback(async () => {
     try {
@@ -180,6 +182,22 @@ export default function RequestDetailsTab() {
     }
   }, []);
 
+  const fetchConnections = useCallback(async () => {
+    try {
+      const res = await fetch("/api/providers");
+      if (!res.ok) return;
+      const data = await res.json();
+      const list = Array.isArray(data) ? data : (data.connections || data.providers || []);
+      setConnections(list.map((c) => ({
+        id: c.id,
+        name: c.name || c.email || c.id,
+        provider: c.provider || c.providerType || ""
+      })));
+    } catch (error) {
+      console.error("Failed to fetch connections:", error);
+    }
+  }, []);
+
   const fetchDetails = useCallback(async () => {
     setLoading(true);
     try {
@@ -188,6 +206,7 @@ export default function RequestDetailsTab() {
         pageSize: pagination.pageSize.toString()
       });
       if (filters.provider) params.append("provider", filters.provider);
+      if (filters.connectionId) params.append("connectionId", filters.connectionId);
       if (filters.startDate) params.append("startDate", filters.startDate);
       if (filters.endDate) params.append("endDate", filters.endDate);
       if (filters.status) params.append("status", filters.status);
@@ -226,7 +245,8 @@ export default function RequestDetailsTab() {
 
   useEffect(() => {
     fetchProviders();
-  }, [fetchProviders]);
+    fetchConnections();
+  }, [fetchProviders, fetchConnections]);
 
   useEffect(() => {
     fetchDetails();
@@ -268,7 +288,7 @@ export default function RequestDetailsTab() {
   };
 
   const handleClearFilters = () => {
-    setFilters({ provider: "", startDate: "", endDate: "", status: "" });
+    setFilters({ provider: "", connectionId: "", startDate: "", endDate: "", status: "" });
   };
 
   return (
@@ -294,6 +314,30 @@ export default function RequestDetailsTab() {
                   {provider.name}
                 </option>
               ))}
+            </select>
+          </div>
+
+          <div className="flex min-w-0 flex-col gap-2">
+            <label htmlFor="account-filter" className="text-sm font-medium text-text-main">Account</label>
+            <select
+              id="account-filter"
+              value={filters.connectionId}
+              onChange={(e) => setFilters({ ...filters, connectionId: e.target.value })}
+              className={cn(
+                "h-9 px-3 rounded-lg border border-black/10 dark:border-white/10 bg-surface",
+                "text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20",
+                "w-full min-w-0 cursor-pointer"
+              )}
+              style={{ colorScheme: 'auto' }}
+            >
+              <option value="">All Accounts</option>
+              {connections
+                .filter((c) => !filters.provider || c.provider === filters.provider)
+                .map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}{c.provider ? ` (${c.provider})` : ""}
+                  </option>
+                ))}
             </select>
           </div>
 
@@ -539,6 +583,7 @@ export default function RequestDetailsTab() {
                 <th className="text-left p-4 text-sm font-semibold text-text-main">Timestamp</th>
                 <th className="text-left p-4 text-sm font-semibold text-text-main">Model</th>
                 <th className="text-left p-4 text-sm font-semibold text-text-main">Provider</th>
+                <th className="text-left p-4 text-sm font-semibold text-text-main">Account</th>
                 <th className="text-right p-4 text-sm font-semibold text-text-main">Input Tokens</th>
                 <th className="text-right p-4 text-sm font-semibold text-text-main">Output Tokens</th>
               <th className="text-left p-4 text-sm font-semibold text-text-main">Latency</th>
@@ -549,7 +594,7 @@ export default function RequestDetailsTab() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan="8" className="p-8 text-center text-text-muted">
+                  <td colSpan="9" className="p-8 text-center text-text-muted">
                     <div className="flex items-center justify-center gap-2">
                       <span className="material-symbols-outlined animate-spin text-[20px]">progress_activity</span>
                       Loading...
@@ -558,7 +603,7 @@ export default function RequestDetailsTab() {
                 </tr>
               ) : details.length === 0 ? (
                 <tr>
-                  <td colSpan="8" className="p-8 text-center text-text-muted">
+                  <td colSpan="9" className="p-8 text-center text-text-muted">
                     No request details found
                   </td>
                 </tr>
@@ -579,6 +624,9 @@ export default function RequestDetailsTab() {
                          {getProviderName(detail.provider, providerNameCache)}
                        </span>
                      </td>
+                    <td className="max-w-[200px] truncate p-4 text-sm text-text-main" title={detail.account || detail.connectionId || ""}>
+                      {detail.account || (detail.connectionId ? `Account ${String(detail.connectionId).slice(0, 8)}...` : <span className="text-text-muted">—</span>)}
+                    </td>
                     <td className="p-4 text-sm text-text-main text-right font-mono">
                       {getInputTokens(detail.tokens).toLocaleString()}
                     </td>
@@ -650,6 +698,12 @@ export default function RequestDetailsTab() {
                  <span className="text-text-muted">Provider:</span>{" "}
                  <span className="text-text-main font-medium">{getProviderName(selectedDetail.provider, providerNameCache)}</span>
                </div>
+              <div>
+                <span className="text-text-muted">Account:</span>{" "}
+                <span className="text-text-main font-medium" title={selectedDetail.connectionId || ""}>
+                  {selectedDetail.account || (selectedDetail.connectionId ? `Account ${String(selectedDetail.connectionId).slice(0, 8)}...` : "—")}
+                </span>
+              </div>
               <div>
                 <span className="text-text-muted">Model:</span>{" "}
                 <span className="text-text-main font-mono">{selectedDetail.model}</span>

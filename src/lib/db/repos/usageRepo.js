@@ -85,7 +85,7 @@ function pushToRing(entry) {
   }
 }
 
-async function getConnectionMapCached() {
+export async function getConnectionMapCached() {
   if (Date.now() - connCache.ts < CONN_CACHE_TTL_MS) return connCache.map;
   try {
     const { getProviderConnections } = await import("./connectionsRepo.js");

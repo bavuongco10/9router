@@ -200,12 +200,29 @@ export async function getRequestDetails(filter = {}) {
      FROM requestDetails ${where} ORDER BY timestamp DESC LIMIT ? OFFSET ?`,
     [...params, pageSize, offset]
   );
+
+  let connectionMap = {};
+  try {
+    const { getConnectionMapCached } = await import("./usageRepo.js").catch(() => ({}));
+    if (typeof getConnectionMapCached === "function") connectionMap = await getConnectionMapCached();
+  } catch {}
+  if (!Object.keys(connectionMap).length) {
+    try {
+      const { getProviderConnections } = await import("./connectionsRepo.js");
+      const all = await getProviderConnections();
+      for (const c of all) connectionMap[c.id] = c.name || c.email || c.id;
+    } catch {}
+  }
+
   const details = rows.map((r) => ({
     id: r.id,
     timestamp: r.timestamp,
     provider: r.provider,
     model: r.model,
     connectionId: r.connectionId,
+    account: r.connectionId
+      ? (connectionMap[r.connectionId] || `Account ${String(r.connectionId).slice(0, 8)}...`)
+      : null,
     status: r.status,
     tokens: { prompt_tokens: r.inputTokens || 0, completion_tokens: r.outputTokens || 0 },
     latency: { ttft: r.latencyTtft || 0, total: r.latencyTotal || 0 },
