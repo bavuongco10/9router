@@ -17,6 +17,8 @@ export default function KiroAuthModal({ isOpen, onMethodSelect, onClose }) {
   const [importing, setImporting] = useState(false);
   const [autoDetecting, setAutoDetecting] = useState(false);
   const [autoDetected, setAutoDetected] = useState(false);
+  const [jsonText, setJsonText] = useState("");
+  const [jsonSummary, setJsonSummary] = useState(null);
 
   // Auto-detect token when import method is selected
   useEffect(() => {
@@ -55,6 +57,67 @@ export default function KiroAuthModal({ isOpen, onMethodSelect, onClose }) {
   const handleBack = () => {
     setSelectedMethod(null);
     setError(null);
+    setJsonText("");
+    setJsonSummary(null);
+  };
+
+  const handleJsonFile = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setError(null);
+    setJsonSummary(null);
+    const reader = new FileReader();
+    reader.onload = (ev) => setJsonText(String(ev.target?.result || ""));
+    reader.onerror = () => setError("Failed to read file");
+    reader.readAsText(file);
+    // Allow re-selecting the same file later.
+    e.target.value = "";
+  };
+
+  const handleImportJson = async () => {
+    const raw = jsonText.trim();
+    if (!raw) {
+      setError("Paste your JSON or choose a file first");
+      return;
+    }
+
+    // Tolerate // comment lines + BOM, matching the helper script.
+    const cleaned = raw
+      .replace(/^﻿/, "")
+      .split(/\r?\n/)
+      .filter((line) => !line.trimStart().startsWith("//"))
+      .join("\n")
+      .trim();
+
+    let parsed;
+    try {
+      parsed = JSON.parse(cleaned);
+    } catch (err) {
+      setError(`Invalid JSON: ${err.message}`);
+      return;
+    }
+
+    setImporting(true);
+    setError(null);
+    setJsonSummary(null);
+    try {
+      const res = await fetch("/api/oauth/kiro/import-json", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(parsed),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Import failed");
+
+      setJsonSummary(data.summary);
+      if ((data.summary?.added || 0) > 0) {
+        onMethodSelect("import-json");
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setImporting(false);
+    }
   };
 
   const handleImportToken = async () => {
@@ -185,6 +248,22 @@ export default function KiroAuthModal({ isOpen, onMethodSelect, onClose }) {
                   <h3 className="font-semibold mb-1">Import Token</h3>
                   <p className="text-sm text-text-muted">
                     Paste refresh token from Kiro IDE.
+                  </p>
+                </div>
+              </div>
+            </button>
+
+            {/* Import JSON (bulk) */}
+            <button
+              onClick={() => handleMethodSelect("import-json")}
+              className="w-full p-4 text-left border border-border rounded-lg hover:bg-sidebar transition-colors"
+            >
+              <div className="flex items-start gap-3">
+                <span className="material-symbols-outlined text-primary mt-0.5">data_object</span>
+                <div className="flex-1">
+                  <h3 className="font-semibold mb-1">Import JSON</h3>
+                  <p className="text-sm text-text-muted">
+                    Bulk-import one or more accounts from a Kiro token JSON file.
                   </p>
                 </div>
               </div>
@@ -369,6 +448,70 @@ export default function KiroAuthModal({ isOpen, onMethodSelect, onClose }) {
                 </div>
               </>
             )}
+          </div>
+        )}
+
+        {/* Import JSON (bulk) */}
+        {selectedMethod === "import-json" && (
+          <div className="space-y-4">
+            <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg border border-blue-200 dark:border-blue-800">
+              <div className="flex gap-2">
+                <span className="material-symbols-outlined text-blue-600 dark:text-blue-400">info</span>
+                <p className="text-sm text-blue-800 dark:text-blue-200">
+                  Paste a Kiro token JSON (single object or array of accounts), or choose a <code>.json</code> file.
+                  Each entry needs a <code>refresh_token</code>. Duplicate refresh tokens are skipped.
+                </p>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-2">
+                JSON file
+              </label>
+              <input
+                type="file"
+                accept=".json,application/json"
+                onChange={handleJsonFile}
+                className="block w-full text-sm text-text-muted file:mr-3 file:py-2 file:px-3 file:rounded file:border-0 file:bg-primary/10 file:text-primary file:cursor-pointer"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-2">
+                Or paste JSON <span className="text-red-500">*</span>
+              </label>
+              <textarea
+                value={jsonText}
+                onChange={(e) => setJsonText(e.target.value)}
+                placeholder='[{"type":"kiro","email":"you@example.com","refresh_token":"aorAAAAAG...","access_token":"...","profile_arn":"...","region":"us-east-1"}]'
+                rows={10}
+                className="w-full font-mono text-xs p-2 border border-border rounded bg-background"
+              />
+            </div>
+
+            {jsonSummary && (
+              <div className="bg-green-50 dark:bg-green-900/20 p-3 rounded-lg border border-green-200 dark:border-green-800 text-sm text-green-900 dark:text-green-100">
+                Imported {jsonSummary.added} new, skipped {jsonSummary.skipped} duplicate
+                {jsonSummary.skipped === 1 ? "" : "s"}
+                {jsonSummary.failed > 0 ? `, ${jsonSummary.failed} failed` : ""}
+                {" "}(of {jsonSummary.total}).
+              </div>
+            )}
+
+            {error && (
+              <div className="bg-red-50 dark:bg-red-900/20 p-3 rounded-lg border border-red-200 dark:border-red-800">
+                <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+              </div>
+            )}
+
+            <div className="flex gap-2">
+              <Button onClick={handleImportJson} fullWidth disabled={importing || !jsonText.trim()}>
+                {importing ? "Importing..." : "Import"}
+              </Button>
+              <Button onClick={handleBack} variant="ghost" fullWidth>
+                Back
+              </Button>
+            </div>
           </div>
         )}
       </div>
