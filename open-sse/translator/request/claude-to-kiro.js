@@ -2,25 +2,27 @@
  * Claude → Kiro Request Translator (DIRECT route, no OpenAI pivot)
  *
  * Converts Anthropic Messages API requests straight to Kiro / AWS
- * CodeWhisperer `GenerateAssistantResponse` payloads. This is the function the
- * direct `claude:kiro` route in ../index.js uses; it is NOT reached through the
- * claude→openai→kiro pivot.
+ * CodeWhisperer `GenerateAssistantResponse` payloads. Mirrors the pivot path
+ * (claude→openai→kiro) byte-for-byte on every behavior that defines the
+ * drop-in contract:
  *
- * It reproduces the two 400-guards that live in openai-to-kiro.js so that a
- * Claude client which omits the `tools` array on a follow-up turn (typical
- * after client-side compaction) does not trip Kiro's schema validator and get
- * "Improperly formed request" (HTTP 400):
- *
- *   1. flattenClaudeToolInteractions — when the client sent NO tools, collapse
- *      every tool_use / tool_result block to plain text so no structured tool
- *      reference survives to trigger the "tools required" rule.
- *   2. reconcileOrphanedToolResults — when tools ARE present, fold any
- *      tool_result whose tool_use_id has no matching tool_use back into the
- *      user text instead of leaving a dangling structured reference.
+ *   - `body.system` is injected as a synthetic leading user message in history
+ *     (pivot equivalent: claude→openai → system role, openai→kiro normalize to
+ *     user), NOT prepended to currentMessage.
+ *   - `maxTokens` is hardcoded to 32000 to match `buildKiroPayload`.
+ *   - The two 400-guards are mirrored: flattenClaudeToolInteractions (no tools
+ *     provided) and reconcileOrphanedToolResults (orphaned tool_result blocks).
+ *   - Tool description length is capped at 10237 chars (matches Quorinex/Kiro-Go
+ *     proxy/translator.go:197 — protects Kiro's schema validator).
+ *   - Anthropic server-side tool definitions (web_search_*, bash_*, etc.) are
+ *     filtered out — Kiro doesn't host them.
+ *   - `tool_result.is_error: true` maps to Kiro `status: "error"` (not "success").
+ *   - `role: "system"` mid-conversation messages collapse to user content with a
+ *     marker (mirrors the pivot's claude→openai→kiro normalization).
+ *   - `stop_sequences` forwarded to inferenceConfig.stopSequences.
  *
  * It also handles the 9router-synthetic `-agentic` / `-thinking` suffixes and
- * the `<thinking_mode>enabled</thinking_mode>` reasoning trigger, matching
- * buildKiroPayload.
+ * the `<thinking_mode>enabled</thinking_mode>` reasoning trigger.
  */
 import { register } from "../index.js";
 import { FORMATS } from "../formats.js";
@@ -31,6 +33,11 @@ import {
   buildThinkingSystemPrefix,
   KIRO_AGENTIC_SYSTEM_PROMPT,
 } from "../../config/kiroConstants.js";
+
+const MAX_TOOL_DESC_LEN = 10237;
+
+const ANTHROPIC_SERVER_SIDE_TOOL_TYPE_RE =
+  /^(bash|text_editor|computer|web_search|web_fetch|code_execution|memory)_\d{8}$/;
 
 /** Stringify a tool_use input as a readable line. */
 function toolUseToText(name, input) {
@@ -64,9 +71,48 @@ function toolResultBlockToText(content) {
 }
 
 /**
+ * Log fields the direct route silently drops because Kiro has no equivalent.
+ * Default-off (only fires when log.debug exists). Helps operators diagnose
+ * "direct route behaves differently from Anthropic-direct" without tcpdump.
+ */
+function logDroppedClaudeFields(body, log) {
+  if (!log?.debug) return;
+  const dropped = [];
+
+  if (body.cache_control) dropped.push("cache_control(top-level)");
+  if (Array.isArray(body.system) && body.system.some((s) => s?.cache_control)) {
+    dropped.push("cache_control(system blocks)");
+  }
+  if (Array.isArray(body.tools) && body.tools.some((t) => t?.cache_control)) {
+    dropped.push("cache_control(tools)");
+  }
+  if (Array.isArray(body.messages)) {
+    for (const m of body.messages) {
+      if (Array.isArray(m.content) && m.content.some((c) => c?.cache_control)) {
+        dropped.push("cache_control(message blocks)");
+        break;
+      }
+    }
+  }
+
+  if (body.tool_choice) dropped.push(`tool_choice=${JSON.stringify(body.tool_choice)}`);
+  if (body.output_config) {
+    if (body.output_config.format) dropped.push("output_config.format");
+    if (body.output_config.effort) dropped.push(`output_config.effort=${body.output_config.effort}`);
+    if (body.output_config.task_budget) dropped.push("output_config.task_budget");
+  }
+  if (body.metadata?.user_id) dropped.push("metadata.user_id");
+  if (body.top_k !== undefined) dropped.push("top_k");
+  if (body.service_tier) dropped.push(`service_tier=${body.service_tier}`);
+
+  if (dropped.length > 0) {
+    log.debug("CLAUDE_TO_KIRO", `Dropped unsupported Claude fields: ${dropped.join(", ")}`);
+  }
+}
+
+/**
  * When the client sent no tools, rewrite every tool_use (assistant) and
  * tool_result (user) content block into plain text. Keeps text + images.
- * Returns a new messages array; never mutates the input.
  */
 function flattenClaudeToolInteractions(messages) {
   const out = [];
@@ -80,6 +126,8 @@ function flattenClaudeToolInteractions(messages) {
           parts.push(block.text);
         } else if (block.type === "tool_use") {
           parts.push(toolUseToText(block.name, block.input));
+        } else if (block.type === "thinking" && block.thinking) {
+          parts.push(`[Previous thinking: ${block.thinking}]`);
         }
       }
       out.push({ ...msg, content: parts.join("\n") });
@@ -102,6 +150,27 @@ function flattenClaudeToolInteractions(messages) {
 }
 
 /**
+ * Synthesize a leading user message that carries body.system as text. This is
+ * how the pivot effectively places system content: claude→openai emits a
+ * `role: "system"` message, openai→kiro normalizes system→user, and the result
+ * is a leading user turn. We do the same in one step.
+ */
+function buildSystemUserMessage(systemField) {
+  let text = "";
+  if (typeof systemField === "string") {
+    text = systemField;
+  } else if (Array.isArray(systemField)) {
+    text = systemField
+      .map((s) => (typeof s === "string" ? s : s?.text || ""))
+      .filter(Boolean)
+      .join("\n");
+  }
+  text = text.trim();
+  if (!text) return null;
+  return { role: "user", content: text };
+}
+
+/**
  * Convert Claude messages to Kiro history + currentMessage.
  * Kiro requires alternating user/assistant turns; consecutive same-role
  * messages are merged.
@@ -120,22 +189,32 @@ function convertClaudeMessagesToKiro(messages, tools, model) {
   const clientProvidedTools = Array.isArray(tools) && tools.length > 0;
 
   const buildToolSpecs = () =>
-    tools.map((t) => {
-      const name = t.name;
-      const description = t.description || `Tool: ${name}`;
-      const schema = t.input_schema || {};
-      const normalizedSchema =
-        Object.keys(schema).length === 0
-          ? { type: "object", properties: {}, required: [] }
-          : { ...schema, required: schema.required ?? [] };
-      return {
-        toolSpecification: {
-          name,
-          description,
-          inputSchema: { json: normalizedSchema },
-        },
-      };
-    });
+    tools
+      .filter((t) => {
+        if (typeof t.type === "string" && ANTHROPIC_SERVER_SIDE_TOOL_TYPE_RE.test(t.type)) {
+          return false;
+        }
+        return true;
+      })
+      .map((t) => {
+        const name = t.name;
+        let description = t.description || `Tool: ${name}`;
+        if (description.length > MAX_TOOL_DESC_LEN) {
+          description = description.slice(0, MAX_TOOL_DESC_LEN);
+        }
+        const schema = t.input_schema || {};
+        const normalizedSchema =
+          Object.keys(schema).length === 0
+            ? { type: "object", properties: {}, required: [] }
+            : { ...schema, required: schema.required ?? [] };
+        return {
+          toolSpecification: {
+            name,
+            description,
+            inputSchema: { json: normalizedSchema },
+          },
+        };
+      });
 
   const flushPending = () => {
     if (currentRole === "user") {
@@ -150,7 +229,6 @@ function convertClaudeMessagesToKiro(messages, tools, model) {
           toolResults: pendingToolResults,
         };
       }
-      // Attach tools to the first user turn only.
       if (clientProvidedTools && !toolsInjected) {
         if (!userMsg.userInputMessage.userInputMessageContext) {
           userMsg.userInputMessage.userInputMessageContext = {};
@@ -172,7 +250,28 @@ function convertClaudeMessagesToKiro(messages, tools, model) {
   };
 
   for (const msg of messages) {
-    const role = msg.role;
+    let role = msg.role;
+    // mid-conversation-system beta: collapse role:"system" → user with a marker.
+    // Mirrors the pivot's claude→openai→kiro normalization.
+    if (role === "system") {
+      role = "user";
+      let text = "";
+      if (typeof msg.content === "string") {
+        text = msg.content;
+      } else if (Array.isArray(msg.content)) {
+        text = msg.content
+          .map((c) => (typeof c === "string" ? c : c?.text || ""))
+          .filter(Boolean)
+          .join("\n");
+      }
+      if (text) {
+        if (role !== currentRole && currentRole !== null) flushPending();
+        currentRole = "user";
+        pendingUserContent.push(`[System: ${text}]`);
+      }
+      continue;
+    }
+
     if (role !== currentRole && currentRole !== null) flushPending();
     currentRole = role;
 
@@ -183,10 +282,24 @@ function convertClaudeMessagesToKiro(messages, tools, model) {
         for (const block of msg.content) {
           if (block.type === "text") {
             pendingUserContent.push(block.text);
-          } else if (block.type === "image" && block.source?.type === "base64") {
-            const mediaType = block.source.media_type || "image/png";
-            const format = mediaType.split("/")[1] || mediaType;
-            pendingImages.push({ format, source: { bytes: block.source.data } });
+          } else if (block.type === "image") {
+            const src = block.source || {};
+            if (src.type === "base64" && src.data) {
+              const mediaType = src.media_type || "image/png";
+              const format = mediaType.split("/")[1] || mediaType;
+              pendingImages.push({ format, source: { bytes: src.data } });
+            } else if (src.type === "url" && src.url) {
+              pendingUserContent.push(`[Image: ${src.url} — not forwarded; Kiro requires base64]`);
+            } else if (src.type === "file" && src.file_id) {
+              pendingUserContent.push(
+                `[Image: file_id=${src.file_id} — not forwarded; Kiro cannot dereference Anthropic Files API]`
+              );
+            }
+          } else if (block.type === "document") {
+            const title = block.title || block.context || "document";
+            pendingUserContent.push(
+              `[Document: ${title} — not forwarded; Kiro does not support document content]`
+            );
           } else if (block.type === "tool_result") {
             let resultContent = "";
             if (typeof block.content === "string") {
@@ -202,7 +315,7 @@ function convertClaudeMessagesToKiro(messages, tools, model) {
             }
             pendingToolResults.push({
               toolUseId: block.tool_use_id,
-              status: "success",
+              status: block.is_error === true ? "error" : "success",
               content: [{ text: resultContent }],
             });
           }
@@ -223,7 +336,11 @@ function convertClaudeMessagesToKiro(messages, tools, model) {
               name: block.name,
               input: block.input || {},
             });
+          } else if (block.type === "thinking" && block.thinking) {
+            textContent += `\n[Previous thinking: ${block.thinking}]\n`;
           }
+          // server_tool_use / *_tool_result / fallback / redacted_thinking:
+          // intentionally dropped — Kiro has no equivalent surface.
         }
       }
       if (textContent) pendingAssistantContent.push(textContent);
@@ -241,7 +358,6 @@ function convertClaudeMessagesToKiro(messages, tools, model) {
 
   if (currentRole !== null) flushPending();
 
-  // Pop the last user turn as currentMessage (skip trailing assistant turns).
   for (let i = history.length - 1; i >= 0; i--) {
     if (history[i].userInputMessage) {
       currentMessage = history.splice(i, 1)[0];
@@ -249,7 +365,6 @@ function convertClaudeMessagesToKiro(messages, tools, model) {
     }
   }
 
-  // Grab tools from the first history user turn before cleanup strips them.
   const firstHistoryTools =
     history[0]?.userInputMessage?.userInputMessageContext?.tools;
 
@@ -268,7 +383,6 @@ function convertClaudeMessagesToKiro(messages, tools, model) {
     }
   });
 
-  // Merge consecutive user turns (Kiro requires alternating roles).
   const mergedHistory = [];
   for (const current of history) {
     const prev = mergedHistory[mergedHistory.length - 1];
@@ -300,7 +414,6 @@ function convertClaudeMessagesToKiro(messages, tools, model) {
     currentMessage = { userInputMessage: { content: "", modelId: model } };
   }
 
-  // Inject tools into currentMessage after cleanup if not already present.
   if (
     firstHistoryTools?.length > 0 &&
     !currentMessage.userInputMessage.userInputMessageContext?.tools
@@ -317,8 +430,7 @@ function convertClaudeMessagesToKiro(messages, tools, model) {
 
 /**
  * Fold orphaned toolResults (those whose toolUseId has no matching toolUse in
- * any assistant turn) back into the user text, removing the dangling
- * structured reference that makes Kiro 400.
+ * any assistant turn) back into the user text.
  */
 function reconcileOrphanedToolResults(history, currentMessage) {
   const validIds = new Set();
@@ -362,14 +474,25 @@ function reconcileOrphanedToolResults(history, currentMessage) {
 
 /**
  * Build a Kiro payload directly from a Claude Messages API request body.
+ * Optional `log` (5th arg) enables silent-drop diagnostics.
  */
-export function claudeToKiroRequest(model, body, stream, credentials) {
+export function claudeToKiroRequest(model, body, stream, credentials, log) {
+  logDroppedClaudeFields(body, log);
+
   let messages = Array.isArray(body.messages) ? body.messages : [];
   const tools = Array.isArray(body.tools) ? body.tools : [];
   const clientProvidedTools = tools.length > 0;
-  const maxTokens = body.max_tokens || 32000;
+  // Match pivot: hardcoded 32000 (buildKiroPayload, openai-to-kiro.js:514).
+  const maxTokens = 32000;
   const temperature = body.temperature;
   const topP = body.top_p;
+
+  // Inject body.system as a synthetic leading user message in history (matches
+  // the pivot's claude→openai→kiro effective placement).
+  const systemMsg = body.system ? buildSystemUserMessage(body.system) : null;
+  if (systemMsg) {
+    messages = [systemMsg, ...messages];
+  }
 
   const {
     upstream: upstreamModel,
@@ -379,7 +502,6 @@ export function claudeToKiroRequest(model, body, stream, credentials) {
   const thinkingEnabled =
     modelImpliesThinking || isThinkingEnabled(body, null, model);
 
-  // Guard 1: no client tools → flatten all tool interactions to text.
   if (!clientProvidedTools) {
     messages = flattenClaudeToolInteractions(messages);
   }
@@ -390,7 +512,6 @@ export function claudeToKiroRequest(model, body, stream, credentials) {
     upstreamModel
   );
 
-  // Guard 2: tools present → reconcile dangling tool_results.
   if (clientProvidedTools) {
     reconcileOrphanedToolResults(history, currentMessage);
   }
@@ -399,18 +520,7 @@ export function claudeToKiroRequest(model, body, stream, credentials) {
 
   let finalContent = currentMessage?.userInputMessage?.content || "";
 
-  // System prompt → prepend to the user content.
-  if (body.system) {
-    let systemText = "";
-    if (typeof body.system === "string") {
-      systemText = body.system;
-    } else if (Array.isArray(body.system)) {
-      systemText = body.system.map((s) => s.text || "").join("\n");
-    }
-    if (systemText) finalContent = `${systemText}\n\n${finalContent}`;
-  }
-
-  // Prefix order: thinking_mode tag, timestamp marker, then agentic prompt.
+  // Prefix order matches pivot: thinking_mode tag, timestamp marker, agentic prompt.
   const timestamp = new Date().toISOString();
   const prefixParts = [];
   if (thinkingEnabled) prefixParts.push(buildThinkingSystemPrefix());
@@ -431,7 +541,7 @@ export function claudeToKiroRequest(model, body, stream, credentials) {
             userInputMessageContext:
               currentMessage.userInputMessage.userInputMessageContext,
           }),
-          ...(currentMessage?.userInputMessage?.images && {
+          ...(currentMessage?.userInputMessage?.images?.length > 0 && {
             images: currentMessage.userInputMessage.images,
           }),
         },
@@ -449,7 +559,11 @@ export function claudeToKiroRequest(model, body, stream, credentials) {
     if (topP !== undefined) payload.inferenceConfig.topP = topP;
   }
 
-  // Non-enumerable hint so the executor can route the upstream model id.
+  if (Array.isArray(body.stop_sequences) && body.stop_sequences.length > 0) {
+    if (!payload.inferenceConfig) payload.inferenceConfig = {};
+    payload.inferenceConfig.stopSequences = body.stop_sequences;
+  }
+
   Object.defineProperty(payload, "_kiroUpstreamModel", {
     value: upstreamModel,
     enumerable: false,

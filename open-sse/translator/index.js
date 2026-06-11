@@ -86,7 +86,7 @@ export function translateRequest(sourceFormat, targetFormat, model, body, stream
 
   // Always ensure tool_calls have id (some providers require it)
   ensureToolCallIds(result);
-  
+
   // Fix missing tool responses (insert empty tool_result if needed)
   fixMissingToolResponses(result);
 
@@ -95,9 +95,22 @@ export function translateRequest(sourceFormat, targetFormat, model, body, stream
     // Direct route: if a translator is registered for this exact source:target
     // pair, use it instead of pivoting through OpenAI. This is lossless for
     // pairs like claude:kiro (avoids the claude->openai->kiro double-hop).
-    const directFn = requestRegistry.get(`${sourceFormat}:${targetFormat}`);
+    //
+    // Disable via env or per-request header (set by upstream caller into
+    // body._disableDirectRoute) so an emergency rollback to the pivot does not
+    // require a redeploy.
+    const directRouteDisabled =
+      process.env.DISABLE_DIRECT_TRANSLATION_ROUTES === "1" ||
+      result?._disableDirectRoute === true;
+    const directFn = !directRouteDisabled
+      ? requestRegistry.get(`${sourceFormat}:${targetFormat}`)
+      : null;
     if (directFn) {
-      result = directFn(model, result, stream, credentials);
+      result = directFn(model, result, stream, credentials, reqLogger);
+      // Direct-route observability: dashboard / logs would otherwise go dark
+      // because we skip the OpenAI intermediate hook. Forward the final
+      // upstream payload under a route-specific key.
+      reqLogger?.logDirectRouteRequest?.(sourceFormat, targetFormat, result);
     } else {
       // Step 1: source -> openai (if source is not openai)
       if (sourceFormat !== FORMATS.OPENAI) {
@@ -171,7 +184,12 @@ export function translateResponse(targetFormat, sourceFormat, chunk, state) {
   // target:source pair, use it instead of pivoting through OpenAI. Mirrors the
   // request-side direct route (e.g. kiro:claude — KiroExecutor already emits
   // OpenAI-shaped chunks, so this converts them straight to Claude SSE).
-  const directFn = responseRegistry.get(`${targetFormat}:${sourceFormat}`);
+  // Honors the same env-var rollback as translateRequest so request and
+  // response stay on the same path.
+  const directRouteDisabled = process.env.DISABLE_DIRECT_TRANSLATION_ROUTES === "1";
+  const directFn = !directRouteDisabled
+    ? responseRegistry.get(`${targetFormat}:${sourceFormat}`)
+    : null;
   if (directFn) {
     const converted = directFn(chunk, state);
     return converted ? (Array.isArray(converted) ? converted : [converted]) : [];

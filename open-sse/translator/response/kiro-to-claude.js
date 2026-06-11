@@ -15,6 +15,10 @@
  */
 import { register } from "../index.js";
 import { FORMATS } from "../formats.js";
+import {
+  sanitizeToolArgs,
+  CLAUDE_OAUTH_TOOL_PREFIX,
+} from "../helpers/toolArgSanitizer.js";
 
 function stopThinkingBlock(state, results) {
   if (!state.thinkingBlockStarted) return;
@@ -74,15 +78,26 @@ export function kiroToClaudeResponse(chunk, state) {
       typeof data.usage.completion_tokens === "number"
         ? data.usage.completion_tokens
         : 0;
-    state.usage = { input_tokens: promptTokens, output_tokens: outputTokens };
+    state.usage = {
+      input_tokens: promptTokens,
+      output_tokens: outputTokens,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 0,
+    };
   }
 
   // First chunk → emit message_start.
   if (!state.messageStartSent) {
     state.messageStartSent = true;
-    state.messageId =
-      (typeof data.id === "string" && data.id.replace("chatcmpl-", "")) ||
-      `msg_${Date.now()}`;
+    let candidateId =
+      (typeof data.id === "string" && data.id.replace("chatcmpl-", "")) || "";
+    if (!candidateId || candidateId === "chat" || candidateId.length < 8) {
+      candidateId =
+        data.extend_fields?.requestId ||
+        data.extend_fields?.traceId ||
+        `msg_${Date.now()}`;
+    }
+    state.messageId = candidateId;
     state.model = data.model || "kiro";
     state.nextBlockIndex = 0;
     results.push({
@@ -150,18 +165,22 @@ export function kiroToClaudeResponse(chunk, state) {
         stopThinkingBlock(state, results);
         stopTextBlock(state, results);
         const toolBlockIndex = state.nextBlockIndex++;
+        const rawName = tc.function?.name || "";
         state.toolCalls.set(idx, {
           id: tc.id,
-          name: tc.function?.name || "",
+          name: rawName,
           blockIndex: toolBlockIndex,
         });
+        const displayName = rawName.startsWith(CLAUDE_OAUTH_TOOL_PREFIX)
+          ? rawName.slice(CLAUDE_OAUTH_TOOL_PREFIX.length)
+          : rawName;
         results.push({
           type: "content_block_start",
           index: toolBlockIndex,
           content_block: {
             type: "tool_use",
             id: tc.id,
-            name: tc.function?.name || "",
+            name: displayName,
             input: {},
           },
         });
@@ -187,10 +206,11 @@ export function kiroToClaudeResponse(chunk, state) {
       for (const [idx, toolInfo] of state.toolCalls) {
         const buffered = state.toolArgBuffers?.get(idx);
         if (buffered) {
+          const sanitized = sanitizeToolArgs(toolInfo.name, buffered);
           results.push({
             type: "content_block_delta",
             index: toolInfo.blockIndex,
-            delta: { type: "input_json_delta", partial_json: buffered },
+            delta: { type: "input_json_delta", partial_json: sanitized },
           });
         }
         results.push({ type: "content_block_stop", index: toolInfo.blockIndex });
@@ -198,7 +218,13 @@ export function kiroToClaudeResponse(chunk, state) {
     }
 
     state.finishReason = choice.finish_reason;
-    const finalUsage = state.usage || { input_tokens: 0, output_tokens: 0 };
+    const baseUsage = state.usage || { input_tokens: 0, output_tokens: 0 };
+    const finalUsage = {
+      input_tokens: baseUsage.input_tokens || 0,
+      output_tokens: baseUsage.output_tokens || 0,
+      cache_creation_input_tokens: baseUsage.cache_creation_input_tokens || 0,
+      cache_read_input_tokens: baseUsage.cache_read_input_tokens || 0,
+    };
     results.push({
       type: "message_delta",
       delta: { stop_reason: convertFinishReason(choice.finish_reason) },
@@ -254,6 +280,8 @@ export function kiroToClaudeNonStreaming(data) {
     usage: {
       input_tokens: usage.prompt_tokens || 0,
       output_tokens: usage.completion_tokens || 0,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 0,
     },
   };
 }
