@@ -155,7 +155,7 @@ function flattenClaudeToolInteractions(messages) {
  * `role: "system"` message, openai→kiro normalizes system→user, and the result
  * is a leading user turn. We do the same in one step.
  */
-function buildSystemUserMessage(systemField) {
+function buildSystemUserMessage(systemField, prepend = null) {
   let text = "";
   if (typeof systemField === "string") {
     text = systemField;
@@ -166,6 +166,10 @@ function buildSystemUserMessage(systemField) {
       .join("\n");
   }
   text = text.trim();
+  const prepended = typeof prepend === "string" ? prepend.trim() : "";
+  if (prepended) {
+    text = text ? `${prepended}\n\n${text}` : prepended;
+  }
   if (!text) return null;
   return { role: "user", content: text };
 }
@@ -487,13 +491,6 @@ export function claudeToKiroRequest(model, body, stream, credentials, log) {
   const temperature = body.temperature;
   const topP = body.top_p;
 
-  // Inject body.system as a synthetic leading user message in history (matches
-  // the pivot's claude→openai→kiro effective placement).
-  const systemMsg = body.system ? buildSystemUserMessage(body.system) : null;
-  if (systemMsg) {
-    messages = [systemMsg, ...messages];
-  }
-
   const {
     upstream: upstreamModel,
     agentic,
@@ -501,6 +498,20 @@ export function claudeToKiroRequest(model, body, stream, credentials, log) {
   } = resolveKiroModel(model);
   const thinkingEnabled =
     modelImpliesThinking || isThinkingEnabled(body, null, model);
+
+  // Inject body.system as a synthetic leading user message in history (matches
+  // the pivot's claude→openai→kiro effective placement). For `-agentic`
+  // variants, fold the chunked-write protocol into the same one-shot system
+  // message instead of prepending it to every user turn — that avoids token
+  // waste, prevents the protocol from polluting historical user-message
+  // content, and stops it leaking into downstream model context.
+  const systemMsg = buildSystemUserMessage(
+    body.system,
+    agentic ? KIRO_AGENTIC_SYSTEM_PROMPT : null
+  );
+  if (systemMsg) {
+    messages = [systemMsg, ...messages];
+  }
 
   if (!clientProvidedTools) {
     messages = flattenClaudeToolInteractions(messages);
@@ -520,12 +531,13 @@ export function claudeToKiroRequest(model, body, stream, credentials, log) {
 
   let finalContent = currentMessage?.userInputMessage?.content || "";
 
-  // Prefix order matches pivot: thinking_mode tag, timestamp marker, agentic prompt.
+  // Prefix order matches pivot: thinking_mode tag, timestamp marker. The
+  // agentic prompt (when applicable) is folded into the leading synthetic
+  // system message instead of repeated on every user turn.
   const timestamp = new Date().toISOString();
   const prefixParts = [];
   if (thinkingEnabled) prefixParts.push(buildThinkingSystemPrefix());
   prefixParts.push(`[Context: Current time is ${timestamp}]`);
-  if (agentic) prefixParts.push(KIRO_AGENTIC_SYSTEM_PROMPT);
   finalContent = `${prefixParts.join("\n\n")}\n\n${finalContent}`;
 
   const payload = {

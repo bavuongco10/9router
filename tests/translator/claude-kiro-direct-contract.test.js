@@ -399,18 +399,57 @@ describe("multi-turn role merging", () => {
 });
 
 describe("agentic suffix injection", () => {
-  it("model with -agentic suffix injects KIRO_AGENTIC_SYSTEM_PROMPT", () => {
+  it("model with -agentic suffix injects KIRO_AGENTIC_SYSTEM_PROMPT into the leading synthetic system message (one-shot, not per-turn)", () => {
     const out = translateRequest(
       FORMATS.CLAUDE,
       FORMATS.KIRO,
       "claude-sonnet-4.5-agentic",
+      {
+        system: "be concise",
+        messages: [
+          { role: "user", content: "first" },
+          { role: "assistant", content: "ok" },
+          { role: "user", content: "second" },
+        ],
+      },
+      true,
+      null,
+      "kiro"
+    );
+
+    // Leading synthetic user-role message in history carries the agentic
+    // prompt + the original system text. The protocol must NOT be repeated
+    // on every user turn — that pollutes history and wastes tokens.
+    const history = out.conversationState.history;
+    const leading = history[0]?.userInputMessage?.content || "";
+    expect(leading).toContain("CHUNKED WRITE PROTOCOL");
+    expect(leading).toContain("be concise");
+
+    // Current message and any other historical user turns should NOT contain
+    // the protocol — only the leading system message should.
+    const cur = out.conversationState.currentMessage.userInputMessage.content;
+    expect(cur).not.toContain("CHUNKED WRITE PROTOCOL");
+    for (const turn of history.slice(1)) {
+      const txt = turn?.userInputMessage?.content || "";
+      expect(txt).not.toContain("CHUNKED WRITE PROTOCOL");
+    }
+  });
+
+  it("model without -agentic suffix does not inject KIRO_AGENTIC_SYSTEM_PROMPT anywhere", () => {
+    const out = translateRequest(
+      FORMATS.CLAUDE,
+      FORMATS.KIRO,
+      "claude-sonnet-4.5",
       { messages: [{ role: "user", content: "hi" }] },
       true,
       null,
       "kiro"
     );
     const cur = out.conversationState.currentMessage.userInputMessage.content;
-    // The agentic prompt mentions chunked write protocol — match a stable marker.
-    expect(cur).toContain("CHUNKED WRITE PROTOCOL");
+    const histTxt = (out.conversationState.history || [])
+      .map((h) => h?.userInputMessage?.content || "")
+      .join("\n");
+    expect(cur).not.toContain("CHUNKED WRITE PROTOCOL");
+    expect(histTxt).not.toContain("CHUNKED WRITE PROTOCOL");
   });
 });
