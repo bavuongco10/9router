@@ -135,10 +135,25 @@ function RecentRequests({ requests = [] }) {
           <button
             type="button"
             onClick={() => setPickerOpen((o) => !o)}
-            className="text-xs text-text-muted hover:text-text px-1.5 py-0.5 rounded border border-border hover:border-text-muted transition-colors"
+            className={`inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-md border transition-colors ${
+              pickerOpen
+                ? "bg-bg-subtle text-text border-text-muted"
+                : "bg-transparent text-text-muted border-border hover:text-text hover:bg-bg-subtle hover:border-text-muted"
+            }`}
             title="Choose columns"
+            aria-haspopup="true"
+            aria-expanded={pickerOpen}
           >
-            Columns ({visible.length})
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+              <rect x="2" y="2.5" width="12" height="11" rx="1.5" />
+              <line x1="6.5" y1="2.5" x2="6.5" y2="13.5" />
+              <line x1="9.5" y1="2.5" x2="9.5" y2="13.5" />
+            </svg>
+            <span>Columns</span>
+            <span className="text-text-muted/70 tabular-nums">{visible.length}</span>
+            <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${pickerOpen ? "rotate-180" : ""}`} aria-hidden="true">
+              <path d="M3 4.5L6 7.5L9 4.5" />
+            </svg>
           </button>
           {pickerOpen && (
             <div className="absolute right-0 top-full mt-1 z-20 bg-bg border border-border rounded shadow-lg min-w-[160px] py-1">
