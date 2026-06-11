@@ -47,6 +47,60 @@ describe("buildKiroPayload", () => {
     });
   });
 
+  describe("agentic chunked-write protocol placement", () => {
+    // The agentic prompt is a one-shot system instruction. Sending it on
+    // every user turn pollutes Kiro's history view, wastes tokens, and bleeds
+    // the protocol into downstream context. Anchor it in the leading turn.
+    it("multi-turn: protocol lives in leading history turn, not currentMessage or later turns", () => {
+      const body = {
+        messages: [
+          { role: "system", content: "be concise" },
+          { role: "user", content: "first" },
+          { role: "assistant", content: "ok" },
+          { role: "user", content: "second" },
+        ],
+      };
+
+      const result = buildKiroPayload("claude-sonnet-4.5-agentic", body, true, {});
+      const cur = result.conversationState.currentMessage.userInputMessage.content;
+      const history = result.conversationState.history || [];
+      const leading = history[0]?.userInputMessage?.content || "";
+      const laterHistTxt = history.slice(1).map((h) => h?.userInputMessage?.content || "").join("\n");
+
+      expect(leading).toContain("CHUNKED WRITE PROTOCOL");
+      expect(cur).not.toContain("CHUNKED WRITE PROTOCOL");
+      expect(laterHistTxt).not.toContain("CHUNKED WRITE PROTOCOL");
+    });
+
+    it("single-turn: no history → protocol attaches to currentMessage as fallback", () => {
+      const body = { messages: [{ role: "user", content: "hi" }] };
+      const result = buildKiroPayload("claude-sonnet-4.5-agentic", body, true, {});
+      const cur = result.conversationState.currentMessage.userInputMessage.content;
+      const history = result.conversationState.history || [];
+
+      expect(history.length).toBe(0);
+      expect(cur).toContain("CHUNKED WRITE PROTOCOL");
+    });
+
+    it("non-agentic model: protocol absent from history and currentMessage", () => {
+      const body = {
+        messages: [
+          { role: "user", content: "first" },
+          { role: "assistant", content: "ok" },
+          { role: "user", content: "second" },
+        ],
+      };
+      const result = buildKiroPayload("claude-sonnet-4.5", body, true, {});
+      const cur = result.conversationState.currentMessage.userInputMessage.content;
+      const histTxt = (result.conversationState.history || [])
+        .map((h) => h?.userInputMessage?.content || "")
+        .join("\n");
+
+      expect(cur).not.toContain("CHUNKED WRITE PROTOCOL");
+      expect(histTxt).not.toContain("CHUNKED WRITE PROTOCOL");
+    });
+  });
+
   describe("image forwarding", () => {
     it("should forward base64 image from image_url content part", () => {
       const fakeBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";

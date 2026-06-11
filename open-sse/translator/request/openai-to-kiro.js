@@ -526,15 +526,34 @@ export function buildKiroPayload(model, body, stream, credentials) {
 
   const timestamp = new Date().toISOString();
 
-  // Build the system-prompt prefix that goes ABOVE the user message body.
+  // Fold the agentic chunked-write protocol into the LEADING history turn
+  // (one-shot) instead of prepending it to every user message. The latter
+  // wastes tokens, pollutes historical user-message content, and bleeds the
+  // protocol into downstream model context on every reply. For single-turn
+  // requests (no prior history), keep it on currentMessage — there is no
+  // repetition concern there, and the prompt still needs to land somewhere.
+  if (agentic) {
+    if (history.length > 0 && history[0]?.userInputMessage) {
+      const lead = history[0].userInputMessage;
+      const existing = lead.content || "";
+      lead.content = existing
+        ? `${KIRO_AGENTIC_SYSTEM_PROMPT}\n\n${existing}`
+        : KIRO_AGENTIC_SYSTEM_PROMPT;
+    }
+  }
+
+  // Build the per-turn prefix that goes ABOVE the user message body.
   // Order: thinking_mode tag first (so Kiro sees it before any user text),
-  // then context/timestamp marker, then optional agentic chunked-write prompt.
+  // then context/timestamp marker. The agentic prompt is one-shot above and
+  // is intentionally NOT included here.
   const prefixParts = [];
   if (thinkingEnabled) {
     prefixParts.push(buildThinkingSystemPrefix());
   }
   prefixParts.push(`[Context: Current time is ${timestamp}]`);
-  if (agentic) {
+  // Single-turn fallback: no history to fold the agentic prompt into, so
+  // attach it to currentMessage. Multi-turn already handled above.
+  if (agentic && history.length === 0) {
     prefixParts.push(KIRO_AGENTIC_SYSTEM_PROMPT);
   }
   finalContent = `${prefixParts.join("\n\n")}\n\n${finalContent}`;
