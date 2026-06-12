@@ -1,7 +1,7 @@
 // Task 08 — drop-in contract tests for the direct claude:kiro / kiro:claude
 // translator pair. Verifies parity with the OpenAI pivot and the new
 // task 01-13 fixes (sanitizer, max_tokens, system placement, content-block
-// fidelity, tool desc cap, server-side tool filtering, etc.).
+// fidelity, tool desc cap, typed-tool downgrade, etc.).
 import { describe, it, expect, vi } from "vitest";
 import "./registerAll.js";
 import { translateRequest, translateResponse } from "../../open-sse/translator/index.js";
@@ -257,7 +257,7 @@ describe("Task 13 — advanced content blocks", () => {
     expect(cur).not.toContain("AAAA");
   });
 
-  it("13d — Anthropic server-side tool definitions are filtered out", () => {
+  it("13d — Anthropic typed tool definitions are downgraded to custom-tool specs", () => {
     const out = C2K({
       tools: [
         { type: "web_search_20260209", name: "web_search" },
@@ -268,8 +268,12 @@ describe("Task 13 — advanced content blocks", () => {
     });
     const tools =
       out.conversationState.currentMessage.userInputMessage.userInputMessageContext.tools;
-    expect(tools).toHaveLength(1);
-    expect(tools[0].toolSpecification.name).toBe("myTool");
+    expect(tools).toHaveLength(3);
+    expect(tools[0].toolSpecification.name).toBe("web_search");
+    expect(tools[0].toolSpecification.inputSchema.json.required).toEqual(["query"]);
+    expect(tools[1].toolSpecification.name).toBe("bash");
+    expect(tools[1].toolSpecification.inputSchema.json.properties.command.type).toBe("string");
+    expect(tools[2].toolSpecification.name).toBe("myTool");
   });
 });
 

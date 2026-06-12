@@ -11,6 +11,11 @@ import {
   buildThinkingSystemPrefix,
   KIRO_AGENTIC_SYSTEM_PROMPT
 } from "../../config/kiroConstants.js";
+import {
+  isTypedTool,
+  isKnownTypedTool,
+  downgradeTypedTool,
+} from "../../config/anthropicToolRegistry.js";
 
 /** Render a single tool call as a readable text line. */
 function toolCallToText(name, input) {
@@ -219,6 +224,28 @@ function convertMessages(messages, tools, model) {
           userMsg.userInputMessage.userInputMessageContext = {};
         }
         userMsg.userInputMessage.userInputMessageContext.tools = tools.map(t => {
+          // Defensive: a Claude→OpenAI translator stage upstream should strip
+          // Anthropic typed tools, but if one leaks through, downgrade it via
+          // the registry rather than emit a schemaless spec. code_execution_*
+          // is downgraded too — no Kiro sandbox; client decides what to do.
+          if (isTypedTool(t) && isKnownTypedTool(t.type)) {
+            const downgraded = downgradeTypedTool(t);
+            if (!downgraded) {
+              throw new Error("UNSUPPORTED_TOOL_TYPE: " + t.type);
+            }
+            const schema = downgraded.input_schema || {};
+            const normalizedSchema = Object.keys(schema).length === 0
+              ? { type: "object", properties: {}, required: [] }
+              : { ...schema, required: schema.required ?? [] };
+            return {
+              toolSpecification: {
+                name: downgraded.name,
+                description: downgraded.description,
+                inputSchema: { json: normalizedSchema }
+              }
+            };
+          }
+
           const name = t.function?.name || t.name;
           let description = t.function?.description || t.description || "";
 
@@ -312,14 +339,26 @@ function convertMessages(messages, tools, model) {
         const toolResultBlocks = msg.content.filter(c => c.type === "tool_result");
         if (toolResultBlocks.length > 0) {
           toolResultBlocks.forEach(block => {
-            const text = Array.isArray(block.content)
-              ? block.content.map(c => c.text || "").join("\n")
-              : (typeof block.content === "string" ? block.content : "");
+            // Match claude-to-kiro.js exactly: prefer text-typed sub-blocks,
+            // fall back to JSON.stringify for non-text/object content, and map
+            // is_error → status so error results aren't silently flipped to
+            // success on the OpenAI pivot path.
+            let text = "";
+            if (typeof block.content === "string") {
+              text = block.content;
+            } else if (Array.isArray(block.content)) {
+              text = block.content
+                .filter(c => c.type === "text")
+                .map(c => c.text)
+                .join("\n") || JSON.stringify(block.content);
+            } else if (block.content) {
+              text = JSON.stringify(block.content);
+            }
 
             pendingToolResults.push({
               toolUseId: block.tool_use_id,
-              status: "success",
-              content: [{ text: text }]
+              status: block.is_error === true ? "error" : "success",
+              content: [{ text }]
             });
           });
         }

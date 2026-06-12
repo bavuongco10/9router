@@ -3,6 +3,7 @@ import { DEFAULT_THINKING_CLAUDE_SIGNATURE } from "../../config/defaultThinkingS
 import { adjustMaxTokens } from "./maxTokensHelper.js";
 import { applyCloaking } from "../../utils/claudeCloaking.js";
 import { deriveSessionId } from "../../utils/sessionManager.js";
+import { isKnownTypedTool } from "../../config/anthropicToolRegistry.js";
 
 // Check if message has valid non-empty content
 export function hasValidContent(msg) {
@@ -220,6 +221,19 @@ export function prepareClaudeRequest(body, provider = null, apiKey = null, conne
     // Strip built-in tools (e.g. web_search_20250305) for providers that don't support them
     if (provider !== "claude") {
       body.tools = body.tools.filter(tool => !tool.type || tool.type === "function");
+    } else {
+      // Anthropic upstream: validate any typed tool's `type` against the
+      // registry. Unknown types reach the gateway only via clients that
+      // assumed a future tool — fail loud rather than letting Anthropic
+      // return an opaque 400.
+      for (const tool of body.tools) {
+        if (!tool || typeof tool !== "object") continue;
+        const t = tool.type;
+        if (!t || t === "custom" || t === "function") continue;
+        if (!isKnownTypedTool(t)) {
+          throw new Error(`UNSUPPORTED_TOOL_TYPE: ${t}`);
+        }
+      }
     }
 
     body.tools = body.tools.map((tool, i) => {

@@ -14,8 +14,9 @@
  *     provided) and reconcileOrphanedToolResults (orphaned tool_result blocks).
  *   - Tool description length is capped at 10237 chars (matches Quorinex/Kiro-Go
  *     proxy/translator.go:197 — protects Kiro's schema validator).
- *   - Anthropic server-side tool definitions (web_search_*, bash_*, etc.) are
- *     filtered out — Kiro doesn't host them.
+ *   - Anthropic typed tool definitions (web_search_*, bash_*, etc.) are
+ *     DOWNGRADED to custom-tool shape via the registry so the model still gets
+ *     a usable schema and emits a real tool_use; the client executes it.
  *   - `tool_result.is_error: true` maps to Kiro `status: "error"` (not "success").
  *   - `role: "system"` mid-conversation messages collapse to user content with a
  *     marker (mirrors the pivot's claude→openai→kiro normalization).
@@ -33,11 +34,12 @@ import {
   buildThinkingSystemPrefix,
   KIRO_AGENTIC_SYSTEM_PROMPT,
 } from "../../config/kiroConstants.js";
+import {
+  isTypedTool,
+  downgradeTypedTool,
+} from "../../config/anthropicToolRegistry.js";
 
 const MAX_TOOL_DESC_LEN = 10237;
-
-const ANTHROPIC_SERVER_SIDE_TOOL_TYPE_RE =
-  /^(bash|text_editor|computer|web_search|web_fetch|code_execution|memory)_\d{8}$/;
 
 /** Stringify a tool_use input as a readable line. */
 function toolUseToText(name, input) {
@@ -193,32 +195,43 @@ function convertClaudeMessagesToKiro(messages, tools, model) {
   const clientProvidedTools = Array.isArray(tools) && tools.length > 0;
 
   const buildToolSpecs = () =>
-    tools
-      .filter((t) => {
-        if (typeof t.type === "string" && ANTHROPIC_SERVER_SIDE_TOOL_TYPE_RE.test(t.type)) {
-          return false;
+    tools.map((t) => {
+      // Downgrade Anthropic typed tools (categories A and B) to custom-tool
+      // shape so Kiro gets a usable schema and the model emits a real
+      // tool_use. code_execution_* is downgraded too — there is no Kiro
+      // sandbox, so we hand the model a {code} schema and let the client
+      // decide whether to execute or ignore.
+      let name;
+      let description;
+      let schema;
+      if (isTypedTool(t)) {
+        const downgraded = downgradeTypedTool(t);
+        if (!downgraded) {
+          throw new Error("UNSUPPORTED_TOOL_TYPE: " + t.type);
         }
-        return true;
-      })
-      .map((t) => {
-        const name = t.name;
-        let description = t.description || `Tool: ${name}`;
-        if (description.length > MAX_TOOL_DESC_LEN) {
-          description = description.slice(0, MAX_TOOL_DESC_LEN);
-        }
-        const schema = t.input_schema || {};
-        const normalizedSchema =
-          Object.keys(schema).length === 0
-            ? { type: "object", properties: {}, required: [] }
-            : { ...schema, required: schema.required ?? [] };
-        return {
-          toolSpecification: {
-            name,
-            description,
-            inputSchema: { json: normalizedSchema },
-          },
-        };
-      });
+        name = downgraded.name;
+        description = downgraded.description;
+        schema = downgraded.input_schema || {};
+      } else {
+        name = t.name;
+        description = t.description || `Tool: ${name}`;
+        schema = t.input_schema || {};
+      }
+      if (description.length > MAX_TOOL_DESC_LEN) {
+        description = description.slice(0, MAX_TOOL_DESC_LEN);
+      }
+      const normalizedSchema =
+        Object.keys(schema).length === 0
+          ? { type: "object", properties: {}, required: [] }
+          : { ...schema, required: schema.required ?? [] };
+      return {
+        toolSpecification: {
+          name,
+          description,
+          inputSchema: { json: normalizedSchema },
+        },
+      };
+    });
 
   const flushPending = () => {
     if (currentRole === "user") {

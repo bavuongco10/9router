@@ -5,6 +5,7 @@ import { buildClineHeaders } from "../../src/shared/utils/clineAuth.js";
 import { getCachedClaudeHeaders } from "../utils/claudeHeaderCache.js";
 import { proxyAwareFetch } from "../utils/proxyFetch.js";
 import { injectReasoningContent } from "../utils/reasoningContentInjector.js";
+import { collectBetaFlags } from "../config/anthropicToolRegistry.js";
 
 export class DefaultExecutor extends BaseExecutor {
   constructor(provider) {
@@ -20,6 +21,16 @@ export class DefaultExecutor extends BaseExecutor {
       const next = { ...body };
       delete next.temperature;
       body = next;
+    }
+    // Stash the per-tool Anthropic-Beta flags required by typed tools so
+    // buildHeaders can merge them into the outbound `anthropic-beta` header.
+    // Without these flags, upstream rejects the typed tool's `type` string
+    // (e.g. `web_search_20250305` requires `web-search-2025-03-05`).
+    if (this.provider === "claude" && Array.isArray(body?.tools) && body.tools.length > 0) {
+      const flags = collectBetaFlags(body.tools);
+      if (flags.length > 0) {
+        body = { ...body, _extraBetaFlags: flags };
+      }
     }
     const transformed = this.applyJsonSchemaFallback(body);
     return injectReasoningContent({ provider: this.provider, model, body: transformed });
@@ -80,7 +91,7 @@ export class DefaultExecutor extends BaseExecutor {
     }
   }
 
-  buildHeaders(credentials, stream = true) {
+  buildHeaders(credentials, stream = true, body = null) {
     const headers = { "Content-Type": "application/json", ...this.config.headers };
 
     switch (this.provider) {
@@ -116,6 +127,25 @@ export class DefaultExecutor extends BaseExecutor {
             }
           }
           Object.assign(headers, cached);
+        }
+        // Per-tool beta flags from typed tools must be unioned in too — without
+        // them upstream rejects the typed `type` string (e.g. web_search_20250305
+        // needs `web-search-2025-03-05`).
+        const extraFlags = Array.isArray(body?._extraBetaFlags) ? body._extraBetaFlags : [];
+        if (extraFlags.length > 0) {
+          const betaKeyExisting = headers["anthropic-beta"] !== undefined
+            ? "anthropic-beta"
+            : (headers["Anthropic-Beta"] !== undefined ? "Anthropic-Beta" : "anthropic-beta");
+          const existing = new Set((headers[betaKeyExisting] || "")
+            .split(",")
+            .map(f => f.trim())
+            .filter(Boolean));
+          for (const flag of extraFlags) existing.add(flag);
+          headers[betaKeyExisting] = Array.from(existing).join(",");
+        }
+        // Don't leak our internal field upstream.
+        if (body && Object.prototype.hasOwnProperty.call(body, "_extraBetaFlags")) {
+          delete body._extraBetaFlags;
         }
         credentials.apiKey
           ? (headers["x-api-key"] = credentials.apiKey)

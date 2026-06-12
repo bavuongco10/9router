@@ -19,6 +19,7 @@ import { handleComboChat } from "open-sse/services/combo.js";
 import { handleBypassRequest } from "open-sse/utils/bypassHandler.js";
 import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import { detectFormatByEndpoint } from "open-sse/translator/formats.js";
+import { isTypedTool, resolveToolType } from "open-sse/config/anthropicToolRegistry.js";
 import * as log from "../utils/logger.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import { getProjectIdForConnection } from "open-sse/services/projectId.js";
@@ -78,6 +79,32 @@ export async function handleChat(request, clientRawRequest = null) {
   const toolCount = body.tools?.length || 0;
   const effort = body.reasoning_effort || body.reasoning?.effort || null;
   log.request("POST", `${url.pathname} | ${modelStr} | ${msgCount} msgs${toolCount ? ` | ${toolCount} tools` : ""}${effort ? ` | effort=${effort}` : ""}`);
+
+  // T6 — per-request tool breakdown. Fires before translation so an
+  // UNSUPPORTED_TOOL_TYPE 422 still leaves a record of what came in.
+  // Categories: typedA (server-executed Anthropic built-ins), typedB
+  // (client-executed Anthropic built-ins), custom (no `type` or `type:custom`/
+  // `type:function`), unknown (typed shape with a `type` not in the registry).
+  if (toolCount > 0 && Array.isArray(body.tools)) {
+    let typedA = 0, typedB = 0, custom = 0, unknown = 0;
+    const sampleTypes = [];
+    for (const tool of body.tools) {
+      if (isTypedTool(tool)) {
+        if (sampleTypes.length < 10) sampleTypes.push(tool.type);
+        const entry = resolveToolType(tool.type);
+        if (entry.unsupported) unknown++;
+        else if (entry.category === "A") typedA++;
+        else if (entry.category === "B") typedB++;
+        else unknown++;
+      } else {
+        custom++;
+      }
+    }
+    const typesStr = sampleTypes.length
+      ? ` types=[${sampleTypes.join(",")}${body.tools.length > sampleTypes.length ? ",..." : ""}]`
+      : "";
+    log.debug("TOOLS", `${modelStr} tools: ${toolCount} (typedA=${typedA} typedB=${typedB} custom=${custom} unknown=${unknown})${typesStr}`);
+  }
 
   // Log API key (masked)
   const authHeader = request.headers.get("Authorization");

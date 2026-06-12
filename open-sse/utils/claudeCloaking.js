@@ -1,5 +1,6 @@
 import { createHash, randomBytes, randomUUID } from "crypto";
 import { CLAUDE_TOOL_SUFFIX, CC_DEFAULT_TOOLS } from "../config/appConstants.js";
+import { isTypedTool } from "../config/anthropicToolRegistry.js";
 
 const CLAUDE_VERSION = "2.1.92";
 const CC_ENTRYPOINT = "sdk-cli";
@@ -40,8 +41,15 @@ export function cloakClaudeTools(body) {
   const clientToolNames = new Set();
   const clientDeclarations = [];
 
-  // All client tools get renamed with suffix
+  // Typed tools (e.g. { type: "web_search_20250305", name: "web_search" }) MUST
+  // pass through unchanged — Anthropic rejects typed tools whose name doesn't
+  // match the canonical for that `type`. Renaming web_search → web_search_ide
+  // produces 400 invalid_request_error from upstream.
   for (const tool of tools) {
+    if (isTypedTool(tool)) {
+      clientDeclarations.push(tool);
+      continue;
+    }
     const suffixed = suffix(tool.name);
     toolNameMap.set(suffixed, tool.name);
     clientToolNames.add(tool.name);
@@ -51,11 +59,15 @@ export function cloakClaudeTools(body) {
   // Client tools first, then CC decoy tools (no overlap: client tools all have _cc suffix)
   const allTools = [...clientDeclarations, ...CC_DECOY_TOOLS];
 
-  // Rename tool_use in message history (all client tools get suffix)
+  // Rename tool_use in message history. Only suffix names that correspond to
+  // a custom tool we actually cloaked — typed-tool tool_use blocks (e.g.
+  // server_tool_use for web_search) must keep their canonical name.
   const renamedMessages = body.messages?.map(msg => {
     if (!Array.isArray(msg.content)) return msg;
     const renamedContent = msg.content.map(block =>
-      block.type === "tool_use" ? { ...block, name: suffix(block.name) } : block
+      block.type === "tool_use" && clientToolNames.has(block.name)
+        ? { ...block, name: suffix(block.name) }
+        : block
     );
     return { ...msg, content: renamedContent };
   });

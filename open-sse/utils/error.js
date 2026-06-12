@@ -129,6 +129,64 @@ export function unavailableResponse(statusCode, message, retryAfter, retryAfterH
 }
 
 /**
+ * Build a structured 422 result for an UNSUPPORTED_TOOL_TYPE thrown by a
+ * translator. Mirrors Anthropic's Messages API error envelope (outer
+ * `{type:"error", error:{...}}`) so Claude clients parse the response with
+ * their existing error handlers instead of seeing an opaque 5xx.
+ *
+ * 422 (Unprocessable Entity) — the request was syntactically valid JSON but
+ * the gateway cannot map a typed tool the client requested. Distinct from a
+ * generic 400 so operators can grep upstream errors apart from real client
+ * bugs.
+ *
+ * @param {string} toolType - The rejected `type` string.
+ * @returns {{ success: false, status: 422, error: string, response: Response }}
+ */
+export function unsupportedToolTypeResult(toolType) {
+  const safeType = typeof toolType === "string" && toolType ? toolType : "unknown";
+  const body = {
+    type: "error",
+    error: {
+      type: "invalid_request_error",
+      code: "UNSUPPORTED_TOOL_TYPE",
+      message: `Unsupported Anthropic typed tool: ${safeType}`,
+      tool_type: safeType
+    }
+  };
+  return {
+    success: false,
+    status: 422,
+    error: `UNSUPPORTED_TOOL_TYPE: ${safeType}`,
+    response: new Response(JSON.stringify(body), {
+      status: 422,
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*"
+      }
+    })
+  };
+}
+
+/**
+ * Inspect an error thrown out of the translator pipeline. If it is an
+ * `UNSUPPORTED_TOOL_TYPE: <type>` marker, return the structured 422 result
+ * (see unsupportedToolTypeResult). Otherwise return null so the caller
+ * falls through to its existing error handling — we do NOT swallow other
+ * errors here.
+ *
+ * @param {Error|*} err
+ * @returns {{ success: false, status: 422, error: string, response: Response } | null}
+ */
+export function classifyTranslatorError(err) {
+  if (!err) return null;
+  const msg = err.message;
+  if (typeof msg !== "string") return null;
+  const PREFIX = "UNSUPPORTED_TOOL_TYPE: ";
+  if (!msg.startsWith(PREFIX)) return null;
+  return unsupportedToolTypeResult(msg.slice(PREFIX.length).trim());
+}
+
+/**
  * Format provider error with context
  * @param {Error} error - Original error
  * @param {string} provider - Provider name

@@ -7,7 +7,7 @@ import { createStreamController } from "../utils/streamHandler.js";
 import { refreshWithRetry } from "../services/tokenRefresh.js";
 import { createRequestLogger } from "../utils/requestLogger.js";
 import { getModelTargetFormat, getModelStrip, getModelUpstreamId, getModelType, PROVIDER_ID_TO_ALIAS } from "../config/providerModels.js";
-import { createErrorResult, parseUpstreamError, formatProviderError } from "../utils/error.js";
+import { createErrorResult, parseUpstreamError, formatProviderError, classifyTranslatorError } from "../utils/error.js";
 import { HTTP_STATUS } from "../config/runtimeConfig.js";
 import { handleBypassRequest } from "../utils/bypassHandler.js";
 import { trackPendingRequest, appendRequestLog, saveRequestDetail } from "@/lib/usageDb.js";
@@ -97,7 +97,22 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     // or an obviously-invalid one before they reach Anthropic.
     scrubStaleThinkingBlocks(translatedBody, provider);
   } else {
-    translatedBody = translateRequest(sourceFormat, targetFormat, upstreamModel, body, stream, credentials, provider, reqLogger, stripList, connectionId, clientTool);
+    try {
+      translatedBody = translateRequest(sourceFormat, targetFormat, upstreamModel, body, stream, credentials, provider, reqLogger, stripList, connectionId, clientTool);
+    } catch (err) {
+      // Fail-loud on unknown Anthropic typed tools (T6). Translators throw
+      // `UNSUPPORTED_TOOL_TYPE: <type>` instead of silently emitting a
+      // schemaless tool spec; classify into a 422 with the Anthropic error
+      // envelope so clients see a structured rejection instead of a 5xx.
+      const classified = classifyTranslatorError(err);
+      if (classified) {
+        trackPendingRequest(model, provider, connectionId, false, true);
+        appendRequestLog({ model, provider, connectionId, status: `FAILED ${classified.status}` }).catch(() => { });
+        log?.warn?.("TOOLS", `${classified.error} | ${sourceFormat} → ${targetFormat}`);
+        return classified;
+      }
+      throw err;
+    }
     if (!translatedBody) {
       trackPendingRequest(model, provider, connectionId, false, true);
       return createErrorResult(HTTP_STATUS.BAD_REQUEST, `Failed to translate request for ${sourceFormat} → ${targetFormat}`);
