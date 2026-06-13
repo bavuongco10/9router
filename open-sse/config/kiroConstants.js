@@ -21,6 +21,23 @@ export const KIRO_UNSUPPORTED_CONTEXT_1M_SUFFIX = "[1m]";
 export const KIRO_UNSUPPORTED_CONTEXT_1M_MESSAGE =
   "[kr/*] '[1m]' suffix is not supported by Kiro upstream. Kiro is AWS Bedrock-backed and does not honor Anthropic's context-1m beta. Use a direct-Anthropic provider for 1M-context routing.";
 
+// Public default CodeWhisperer profile ARNs (us-east-1), keyed by auth method.
+// Used when an account cannot resolve its own profileArn. Builder ID and social
+// (Google/GitHub) sign-ins map to different shared profiles.
+export const KIRO_DEFAULT_PROFILE_ARNS = {
+  "builder-id": "arn:aws:codewhisperer:us-east-1:638616132270:profile/AAAACCCCXXXX",
+  social: "arn:aws:codewhisperer:us-east-1:699475941385:profile/EHGA3GRVQMUK",
+};
+
+// Back-compat single default (Builder ID).
+export const KIRO_DEFAULT_PROFILE_ARN = KIRO_DEFAULT_PROFILE_ARNS["builder-id"];
+
+/** Resolve the shared default profileArn for a given auth method. */
+export function resolveDefaultProfileArn(authMethod) {
+  const social = authMethod === "google" || authMethod === "github";
+  return social ? KIRO_DEFAULT_PROFILE_ARNS.social : KIRO_DEFAULT_PROFILE_ARNS["builder-id"];
+}
+
 export const KIRO_THINKING_BUDGET_DEFAULT = 16000;
 
 export const KIRO_AGENTIC_SYSTEM_PROMPT = `

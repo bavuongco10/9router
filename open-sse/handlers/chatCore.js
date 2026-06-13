@@ -2,6 +2,7 @@ import { detectFormat, getTargetFormat } from "../services/provider.js";
 import { translateRequest } from "../translator/index.js";
 import { scrubStaleThinkingBlocks } from "../translator/helpers/claudeHelper.js";
 import { FORMATS } from "../translator/formats.js";
+import { normalizeClaudePassthrough } from "../translator/helpers/claudeHelper.js";
 import { COLORS } from "../utils/stream.js";
 import { createStreamController } from "../utils/streamHandler.js";
 import { refreshWithRetry } from "../services/tokenRefresh.js";
@@ -96,6 +97,8 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     // so strip thinking blocks that carry the pre-#952 placeholder signature
     // or an obviously-invalid one before they reach Anthropic.
     scrubStaleThinkingBlocks(translatedBody, provider);
+    // Normalize newer Cowork/CC beta shapes (adaptive thinking, mid-conversation system) the API rejects
+    if (clientTool === "claude") normalizeClaudePassthrough(translatedBody, upstreamModel);
   } else {
     try {
       translatedBody = translateRequest(sourceFormat, targetFormat, upstreamModel, body, stream, credentials, provider, reqLogger, stripList, connectionId, clientTool);
