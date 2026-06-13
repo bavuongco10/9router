@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { KiroService } from "@/lib/oauth/services/kiro";
 import { createProviderConnection, getProviderConnections } from "@/models";
 
+const MAX_ACCOUNTS = 200;
+
 /**
  * POST /api/oauth/kiro/import-json
  *
@@ -41,13 +43,30 @@ export async function POST(request) {
     );
   }
 
+  if (accounts.length > MAX_ACCOUNTS) {
+    return NextResponse.json(
+      { error: `Too many accounts in one request (max ${MAX_ACCOUNTS})` },
+      { status: 413 }
+    );
+  }
+
+  // Opt-in to overwrite existing connections that match by email. Default is
+  // to skip — without this, a same-email entry would silently clobber the
+  // stored access/refresh tokens via createProviderConnection's email dedupe.
+  const overwriteByEmail = body?.overwrite === true;
+
   const kiroService = new KiroService();
 
-  // Build a quick lookup of existing kiro refresh tokens so we can skip dupes
-  // before hitting createProviderConnection (which dedupes by email only).
+  // Build a quick lookup of existing kiro connections so we can skip dupes
+  // before hitting createProviderConnection (which dedupes by email and would
+  // otherwise overwrite tokens when an attacker-supplied entry shares an
+  // existing email — token-takeover risk).
   const existing = await getProviderConnections("kiro");
   const existingRefresh = new Set(
     existing.map(c => c?.refreshToken).filter(Boolean)
+  );
+  const existingEmails = new Set(
+    existing.map(c => (c?.email || "").trim().toLowerCase()).filter(Boolean)
   );
 
   const results = [];
@@ -60,7 +79,7 @@ export async function POST(request) {
     const label = acc.email || `account-${i + 1}`;
 
     if (existingRefresh.has(acc.refresh_token)) {
-      results.push({ index: i, email: acc.email || null, status: "skipped", reason: "duplicate refresh token" });
+      results.push({ index: i, email: acc.email || null, status: "skipped" });
       skipped++;
       continue;
     }
@@ -76,6 +95,17 @@ export async function POST(request) {
       try {
         email = kiroService.extractEmailFromJWT(acc.access_token);
       } catch {}
+    }
+
+    // Email-collision guard: createProviderConnection merges by email and
+    // would overwrite the stored tokens. Skip unless caller opted into
+    // overwrite. Use a non-distinguishing "skipped" reason so the response
+    // doesn't double as a "is this email/token present" oracle.
+    const emailKey = (email || "").trim().toLowerCase();
+    if (emailKey && existingEmails.has(emailKey) && !overwriteByEmail) {
+      results.push({ index: i, email, status: "skipped" });
+      skipped++;
+      continue;
     }
 
     try {
@@ -114,7 +144,7 @@ export async function POST(request) {
         index: i,
         email,
         status: "failed",
-        error: err.message || String(err),
+        error: "Failed to create connection",
       });
       failed++;
     }
