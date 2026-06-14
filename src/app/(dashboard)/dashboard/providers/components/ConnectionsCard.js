@@ -426,7 +426,7 @@ export default function ConnectionsCard({ providerId, isOAuth }) {
                 saveStrategy(strategy, enabled ? (providerStickyLimit || "1") : providerStickyLimit);
               }}
             />
-            {providerStrategy === "round-robin" && (
+            {providerStrategy === "round-robin" && !perConversation && (
               <div className="flex flex-wrap items-center gap-1.5">
                 <span className="text-xs text-text-muted">Sticky:</span>
                 <input

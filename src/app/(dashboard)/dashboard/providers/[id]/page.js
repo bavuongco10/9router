@@ -1324,7 +1324,7 @@ export default function ProviderDetailPage() {
                   checked={providerStrategy === "round-robin"}
                   onChange={handleRoundRobinToggle}
                 />
-                {providerStrategy === "round-robin" && (
+                {providerStrategy === "round-robin" && !perConversation && (
                   <div className="flex items-center gap-1.5">
                     <span className="text-xs text-text-muted">Sticky:</span>
                     <input
