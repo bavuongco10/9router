@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSettings, updateSettings } from "@/lib/localDb";
 import { applyOutboundProxyEnv } from "@/lib/network/outboundProxy";
 import { resetComboRotation } from "open-sse/services/combo.js";
+import { resetConversationRouting } from "@/sse/services/conversationRouting.js";
 import bcrypt from "bcryptjs";
 
 export const dynamic = "force-dynamic";
@@ -81,13 +82,22 @@ export async function PATCH(request) {
       applyOutboundProxyEnv(settings);
     }
 
-    // Invalidate combo rotation state when strategy settings change
+    // Invalidate combo rotation state when combo strategy settings change
     if (
       Object.prototype.hasOwnProperty.call(body, "comboStrategy") ||
       Object.prototype.hasOwnProperty.call(body, "comboStickyRoundRobinLimit") ||
       Object.prototype.hasOwnProperty.call(body, "comboStrategies")
     ) {
       resetComboRotation();
+    }
+
+    // Invalidate per-conversation routing when provider strategy settings change
+    if (
+      Object.prototype.hasOwnProperty.call(body, "providerStrategies") ||
+      Object.prototype.hasOwnProperty.call(body, "fallbackStrategy") ||
+      Object.prototype.hasOwnProperty.call(body, "stickyRoundRobinLimit")
+    ) {
+      resetConversationRouting();
     }
 
     const { password, oidcClientSecret, ...safeSettings } = settings;

@@ -13,6 +13,7 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
   const [formData, setFormData] = useState({
     name: "",
     priority: 1,
+    weight: 1,
     apiKey: "",
   });
   const [azureData, setAzureData] = useState({
@@ -37,6 +38,7 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
     setFormData({
       name: connection.name || "",
       priority: connection.priority || 1,
+      weight: connection.weight ?? 1,
       apiKey: "",
     });
     if (connection.provider === "azure" && connection.providerSpecificData) {
@@ -134,6 +136,7 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
       const updates = {
         name: formData.name,
         priority: formData.priority,
+        weight: Number.parseInt(formData.weight, 10) || 1,
         // Always send an array. The PUT route normalizes an empty list to
         // `null` server-side, and rejects a literal `null` with 400.
         allowedModels,
@@ -214,6 +217,15 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
           type="number"
           value={formData.priority}
           onChange={(e) => setFormData({ ...formData, priority: Number.parseInt(e.target.value, 10) || 1 })}
+        />
+        <Input
+          label="Weight"
+          type="number"
+          min={1}
+          step={1}
+          value={formData.weight}
+          onChange={(e) => setFormData({ ...formData, weight: Number.parseInt(e.target.value, 10) || 1 })}
+          hint="New conversations this connection takes before rotating (round-robin per-conversation)."
         />
 
         {!isOAuth && (

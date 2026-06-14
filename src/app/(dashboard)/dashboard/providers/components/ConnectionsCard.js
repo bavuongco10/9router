@@ -308,6 +308,7 @@ export default function ConnectionsCard({ providerId, isOAuth }) {
   const [selectedConnection, setSelectedConnection] = useState(null);
   const [providerStrategy, setProviderStrategy] = useState(null);
   const [providerStickyLimit, setProviderStickyLimit] = useState("1");
+  const [perConversation, setPerConversation] = useState(false);
   const [confirmState, setConfirmState] = useState(null);
 
   const fetch_ = useCallback(async () => {
@@ -325,13 +326,14 @@ export default function ConnectionsCard({ providerId, isOAuth }) {
       const override = (settingsData.providerStrategies || {})[providerId] || {};
       setProviderStrategy(override.fallbackStrategy || null);
       setProviderStickyLimit(override.stickyRoundRobinLimit != null ? String(override.stickyRoundRobinLimit) : "1");
+      setPerConversation(override.perConversation === true);
     } catch (e) { console.log("ConnectionsCard fetch error:", e); }
     finally { setLoading(false); }
   }, [providerId]);
 
   useEffect(() => { fetch_(); }, [fetch_]);
 
-  const saveStrategy = async (strategy, stickyLimit) => {
+  const saveStrategy = async (strategy, stickyLimit, perConv = perConversation) => {
     try {
       const res = await fetch("/api/settings", { cache: "no-store" });
       const data = res.ok ? await res.json() : {};
@@ -339,11 +341,17 @@ export default function ConnectionsCard({ providerId, isOAuth }) {
       const override = {};
       if (strategy) override.fallbackStrategy = strategy;
       if (strategy === "round-robin" && stickyLimit !== "") override.stickyRoundRobinLimit = Number(stickyLimit) || 3;
+      if (strategy === "round-robin") override.perConversation = perConv;
       const updated = { ...current };
       if (Object.keys(override).length === 0) delete updated[providerId];
       else updated[providerId] = override;
       await fetch("/api/settings", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ providerStrategies: updated }) });
     } catch (e) { console.log("saveStrategy error:", e); }
+  };
+
+  const handlePerConversationToggle = (enabled) => {
+    setPerConversation(enabled);
+    saveStrategy(providerStrategy, providerStickyLimit, enabled);
   };
 
   const handleSwapPriority = async (i1, i2) => {
@@ -425,6 +433,15 @@ export default function ConnectionsCard({ providerId, isOAuth }) {
                   type="number" min={1} value={providerStickyLimit}
                   onChange={(e) => { setProviderStickyLimit(e.target.value); saveStrategy("round-robin", e.target.value); }}
                   className="w-16 px-2 py-1 text-xs border border-border rounded-md bg-background focus:outline-none focus:border-primary"
+                />
+              </div>
+            )}
+            {providerStrategy === "round-robin" && (
+              <div className="flex flex-wrap items-center gap-1.5" title="Pin each conversation to one connection">
+                <span className="text-xs text-text-muted">Per-Conversation</span>
+                <Toggle
+                  checked={perConversation}
+                  onChange={handlePerConversationToggle}
                 />
               </div>
             )}

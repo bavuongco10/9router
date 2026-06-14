@@ -7,6 +7,7 @@ import {
   extractApiKey,
   isValidApiKey,
 } from "../services/auth.js";
+import { deriveConversationKey } from "../services/conversationRouting.js";
 import { cacheClaudeHeaders } from "open-sse/utils/claudeHeaderCache.js";
 import { getSettings, getApiKeyByKey, getRule, getCombos } from "@/lib/localDb";
 import { isModelAllowedForKey } from "@/lib/access/ruleEval";
@@ -236,13 +237,18 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
   // Diagnostic per-connection model test: pin to one connection, no fallback.
   const strictConnectionId = request?.headers?.get("x-connection-id-strict") || null;
 
+  // Stable per-conversation key for sticky routing. Derived once so every retry
+  // in the fallback loop reuses the same key (null = not derivable; auth.js
+  // ignores a null key and falls back to normal selection).
+  const conversationKey = deriveConversationKey({ provider, model, body, headers: request?.headers });
+
   // Try with available accounts (fallback on errors)
   const excludeConnectionIds = new Set();
   let lastError = null;
   let lastStatus = null;
 
   while (true) {
-    const credentials = await getProviderCredentials(provider, excludeConnectionIds, model, { bypassModelWhitelist, strictConnectionId });
+    const credentials = await getProviderCredentials(provider, excludeConnectionIds, model, { bypassModelWhitelist, strictConnectionId, conversationKey });
 
     // All accounts unavailable
     if (!credentials || credentials.allRateLimited) {
