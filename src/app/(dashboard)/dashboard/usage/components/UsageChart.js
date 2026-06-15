@@ -92,15 +92,31 @@ export default function UsageChart({ period = "7d" }) {
               width={56}
             />
             <Tooltip
-              contentStyle={{
-                backgroundColor: "var(--color-bg)",
-                border: "1px solid var(--color-border)",
-                borderRadius: "8px",
-                fontSize: "12px",
+              cursor={{ stroke: "currentColor", strokeOpacity: 0.15 }}
+              content={({ active, payload, label }) => {
+                if (!active || !payload?.length) return null;
+                return (
+                  <div
+                    className="rounded-md border border-border bg-bg px-3 py-2 text-xs shadow-md"
+                    style={{ color: "var(--color-text-main)" }}
+                  >
+                    <div className="mb-1 font-medium">{label}</div>
+                    {payload.map((p) => (
+                      <div key={p.dataKey} className="flex items-center gap-2">
+                        <span
+                          aria-hidden="true"
+                          className="inline-block h-2 w-2 rounded-sm"
+                          style={{ backgroundColor: p.color || p.stroke }}
+                        />
+                        <span className="text-text-muted">{p.name}</span>
+                        <span className="ml-auto font-mono tabular-nums">
+                          {p.dataKey === "tokens" ? fmtTokens(p.value) : fmtCost(p.value)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                );
               }}
-              formatter={(value, name) =>
-                name === "Tokens" ? [fmtTokens(value), name] : [fmtCost(value), name]
-              }
             />
             <Legend wrapperStyle={{ fontSize: "12px" }} />
             <Area

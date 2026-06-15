@@ -107,14 +107,30 @@ export default function ApiKeyComparisonChart({ byApiKey }) {
               width={140}
             />
             <Tooltip
-              contentStyle={{
-                backgroundColor: "var(--color-bg)",
-                border: "1px solid var(--color-border)",
-                borderRadius: "8px",
-                fontSize: "12px",
-              }}
               cursor={{ fill: "currentColor", fillOpacity: 0.05 }}
-              formatter={(value) => [formatter(value), metricLabel]}
+              content={({ active, payload, label }) => {
+                if (!active || !payload?.length) return null;
+                const p = payload[0];
+                return (
+                  <div
+                    className="rounded-md border border-border bg-bg px-3 py-2 text-xs shadow-md"
+                    style={{ color: "var(--color-text-main)" }}
+                  >
+                    <div className="mb-1 font-medium truncate max-w-[260px]" title={label}>
+                      {label}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span
+                        aria-hidden="true"
+                        className="inline-block h-2 w-2 rounded-sm"
+                        style={{ backgroundColor: p.payload?.fill || p.color }}
+                      />
+                      <span className="text-text-muted">{metricLabel}</span>
+                      <span className="ml-auto font-mono tabular-nums">{formatter(p.value)}</span>
+                    </div>
+                  </div>
+                );
+              }}
             />
             <Bar dataKey={metric} radius={[0, 4, 4, 0]}>
               {data.map((_, i) => (
