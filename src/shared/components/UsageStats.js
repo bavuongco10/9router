@@ -16,6 +16,7 @@ import OverviewCards from "@/app/(dashboard)/dashboard/usage/components/Overview
 import UsageTable, { fmt, fmtTime } from "@/app/(dashboard)/dashboard/usage/components/UsageTable";
 import ProviderTopology from "@/app/(dashboard)/dashboard/usage/components/ProviderTopology";
 import UsageChart from "@/app/(dashboard)/dashboard/usage/components/UsageChart";
+import ApiKeyComparisonChart from "@/app/(dashboard)/dashboard/usage/components/ApiKeyComparisonChart";
 
 function timeAgo(timestamp) {
   const diff = Math.floor((Date.now() - new Date(timestamp)) / 1000);
@@ -598,6 +599,9 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
 
       {/* Token / Cost chart - sync period */}
       {loading ? spinner : <UsageChart period={period} />}
+
+      {/* Per-API-key comparison chart */}
+      {loading ? spinner : <ApiKeyComparisonChart byApiKey={stats.byApiKey} />}
 
       {/* Table with dropdown selector */}
       <div className="flex flex-col gap-3">
