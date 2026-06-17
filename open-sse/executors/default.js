@@ -175,6 +175,8 @@ export class DefaultExecutor extends BaseExecutor {
     return BEARER;
   }
 
+  buildHeaders(credentials, stream = true, body = null) {
+    const headers = { "Content-Type": "application/json", ...this.config.headers };
     const desc = AUTH_DESCRIPTORS[this.provider] || this.resolveAuthDescriptor();
     // Hooks run BEFORE auth so dynamic overlays (claude cached headers) can't clobber the token.
     for (const hook of desc.hooks || []) HEADER_HOOKS[hook]?.(headers, credentials);
