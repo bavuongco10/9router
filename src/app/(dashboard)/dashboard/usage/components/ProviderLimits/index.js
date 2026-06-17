@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import Link from "next/link";
 import ProviderIcon from "@/shared/components/ProviderIcon";
 import QuotaTable from "./QuotaTable";
 import Toggle from "@/shared/components/Toggle";
@@ -921,7 +922,11 @@ export default function ProviderLimits() {
               <div className="px-3 py-2 border-b border-black/10 dark:border-white/10">
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 min-w-0">
-                    <div className="w-8 h-8 shrink-0 rounded-md flex items-center justify-center overflow-hidden">
+                    <Link
+                      href={`/dashboard/providers/${conn.provider}`}
+                      className="w-8 h-8 shrink-0 rounded-md flex items-center justify-center overflow-hidden"
+                      title={`Open ${conn.provider} provider`}
+                    >
                       <ProviderIcon
                         src={`/providers/${conn.provider}.png`}
                         alt={conn.provider}
@@ -931,12 +936,16 @@ export default function ProviderLimits() {
                           conn.provider?.slice(0, 2).toUpperCase() || "PR"
                         }
                       />
-                    </div>
+                    </Link>
                     <div className="min-w-0">
                       <div className="flex items-center gap-1.5 min-w-0">
-                        <h3 className="text-sm font-semibold text-text-primary capitalize truncate">
+                        <Link
+                          href={`/dashboard/providers/${conn.provider}`}
+                          className="text-sm font-semibold text-text-primary capitalize truncate hover:text-primary hover:underline"
+                          title={`Open ${conn.provider} provider`}
+                        >
                           {conn.provider}
-                        </h3>
+                        </Link>
                         {quota?.tier ? (
                           <span
                             className="shrink-0 rounded-full border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-primary"
