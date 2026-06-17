@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { scrubStaleThinkingBlocks } from "open-sse/translator/helpers/claudeHelper.js";
+import { scrubStaleThinkingBlocks } from "open-sse/translator/formats/claude.js";
 import { DEFAULT_THINKING_CLAUDE_SIGNATURE } from "open-sse/config/defaultThinkingSignature.js";
 
 const REAL_SIG = "EpYBCkYIBxgCKkBz" + "x".repeat(120); // plausible Anthropic signature shape (>40 chars)

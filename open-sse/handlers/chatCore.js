@@ -1,6 +1,6 @@
 import { detectFormat, getTargetFormat } from "../services/provider.js";
 import { translateRequest } from "../translator/index.js";
-import { scrubStaleThinkingBlocks } from "../translator/helpers/claudeHelper.js";
+import { scrubStaleThinkingBlocks } from "../translator/formats/claude.js";
 import { FORMATS } from "../translator/formats.js";
 import { normalizeClaudePassthrough } from "../translator/formats/claude.js";
 import { COLORS } from "../utils/stream.js";

@@ -21,7 +21,7 @@
 import { describe, it, expect } from "vitest";
 import { claudeToKiroRequest } from "../../open-sse/translator/request/claude-to-kiro.js";
 import { buildKiroPayload } from "../../open-sse/translator/request/openai-to-kiro.js";
-import { prepareClaudeRequest } from "../../open-sse/translator/helpers/claudeHelper.js";
+import { prepareClaudeRequest } from "../../open-sse/translator/formats/claude.js";
 import { kiroToClaudeResponse } from "../../open-sse/translator/response/kiro-to-claude.js";
 import { convertKiroToOpenAI } from "../../open-sse/translator/response/kiro-to-openai.js";
 

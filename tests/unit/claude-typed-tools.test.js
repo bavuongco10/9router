@@ -12,7 +12,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { cloakClaudeTools } from "../../open-sse/utils/claudeCloaking.js";
-import { prepareClaudeRequest } from "../../open-sse/translator/helpers/claudeHelper.js";
+import { prepareClaudeRequest } from "../../open-sse/translator/formats/claude.js";
 import { DefaultExecutor } from "../../open-sse/executors/default.js";
 
 describe("cloakClaudeTools — typed tool passthrough", () => {
