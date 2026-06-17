@@ -75,3 +75,6 @@ gitbook/README.md
 
 # Serena MCP local cache
 .serena/
+
+# Refactor backup reference (do not bundle/lint)
+open-sse.old/

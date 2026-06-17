@@ -2,21 +2,21 @@
  * Unit tests for open-sse/translator/request/openai-to-kiro.js
  *
  * Tests cover:
- *  - buildKiroPayload() - basic message conversion
+ *  - openaiToKiroRequest() - basic message conversion
  *  - Image forwarding fix: images in currentMessage must be included in payload
  */
 
 import { describe, it, expect } from "vitest";
-import { buildKiroPayload } from "../../open-sse/translator/request/openai-to-kiro.js";
+import { openaiToKiroRequest } from "../../open-sse/translator/request/openai-to-kiro.js";
 
-describe("buildKiroPayload", () => {
+describe("openaiToKiroRequest", () => {
   describe("basic message conversion", () => {
     it("should convert a simple text message", () => {
       const body = {
         messages: [{ role: "user", content: "Hello" }]
       };
 
-      const result = buildKiroPayload("claude-sonnet-4.6", body, true, {});
+      const result = openaiToKiroRequest("claude-sonnet-4.6", body, true, {});
 
       const currentMsg = result.conversationState.currentMessage;
       expect(currentMsg.userInputMessage.content).toContain("Hello");
@@ -29,7 +29,7 @@ describe("buildKiroPayload", () => {
         messages: [{ role: "user", content: "No images here" }]
       };
 
-      const result = buildKiroPayload("claude-sonnet-4.6", body, true, {});
+      const result = openaiToKiroRequest("claude-sonnet-4.6", body, true, {});
 
       const currentMsg = result.conversationState.currentMessage;
       expect(currentMsg.userInputMessage.images).toBeUndefined();
@@ -116,7 +116,7 @@ describe("buildKiroPayload", () => {
         ]
       };
 
-      const result = buildKiroPayload("claude-sonnet-4.6", body, true, {});
+      const result = openaiToKiroRequest("claude-sonnet-4.6", body, true, {});
 
       const currentMsg = result.conversationState.currentMessage;
       expect(currentMsg.userInputMessage.images).toBeDefined();
@@ -140,7 +140,7 @@ describe("buildKiroPayload", () => {
         ]
       };
 
-      const result = buildKiroPayload("claude-sonnet-4.6", body, true, {});
+      const result = openaiToKiroRequest("claude-sonnet-4.6", body, true, {});
 
       const currentMsg = result.conversationState.currentMessage;
       expect(currentMsg.userInputMessage.images).toHaveLength(2);
@@ -160,7 +160,7 @@ describe("buildKiroPayload", () => {
         ]
       };
 
-      const result = buildKiroPayload("claude-sonnet-4.6", body, true, {});
+      const result = openaiToKiroRequest("claude-sonnet-4.6", body, true, {});
 
       const currentMsg = result.conversationState.currentMessage;
       expect(currentMsg.userInputMessage.images).toBeUndefined();
@@ -180,7 +180,7 @@ describe("buildKiroPayload", () => {
         ]
       };
 
-      const result = buildKiroPayload("claude-sonnet-4.6", body, true, {});
+      const result = openaiToKiroRequest("claude-sonnet-4.6", body, true, {});
 
       const currentMsg = result.conversationState.currentMessage;
       expect(currentMsg.userInputMessage.content).toContain("What is in this image?");
@@ -200,7 +200,7 @@ describe("buildKiroPayload", () => {
         ]
       };
 
-      const result = buildKiroPayload("claude-sonnet-4.6", body, true, {});
+      const result = openaiToKiroRequest("claude-sonnet-4.6", body, true, {});
 
       const currentMsg = result.conversationState.currentMessage;
       // HTTP URLs are not supported by Kiro — converted to text placeholder
@@ -231,7 +231,7 @@ describe("buildKiroPayload", () => {
         // note: no `tools`
       };
 
-      const result = buildKiroPayload("claude-sonnet-4.6", body, true, {});
+      const result = openaiToKiroRequest("claude-sonnet-4.6", body, true, {});
       const cs = result.conversationState;
 
       // No structured tool content anywhere
@@ -266,7 +266,7 @@ describe("buildKiroPayload", () => {
         ]
       };
 
-      const result = buildKiroPayload("claude-sonnet-4.6", body, true, {});
+      const result = openaiToKiroRequest("claude-sonnet-4.6", body, true, {});
       const cs = result.conversationState;
 
       const allJson = JSON.stringify(cs);
@@ -298,7 +298,7 @@ describe("buildKiroPayload", () => {
         ]
       };
 
-      const result = buildKiroPayload("claude-sonnet-4.6", body, true, {});
+      const result = openaiToKiroRequest("claude-sonnet-4.6", body, true, {});
       const cs = result.conversationState;
 
       // Structured tool spec carried on currentMessage
@@ -335,7 +335,7 @@ describe("buildKiroPayload", () => {
         ]
       };
 
-      const result = buildKiroPayload("claude-sonnet-4.6", body, true, {});
+      const result = openaiToKiroRequest("claude-sonnet-4.6", body, true, {});
       const cs = result.conversationState;
       const allJson = JSON.stringify(cs);
 

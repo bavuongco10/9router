@@ -113,12 +113,7 @@ describe("Kiro → Claude (direct route, OpenAI-shaped chunks from executor)", (
     );
     const md = events.find((e) => e.type === "message_delta");
     expect(md.delta.stop_reason).toBe("end_turn");
-    expect(md.usage).toEqual({
-      input_tokens: 5,
-      output_tokens: 3,
-      cache_creation_input_tokens: 0,
-      cache_read_input_tokens: 0,
-    });
+    expect(md.usage).toEqual({ input_tokens: 5, output_tokens: 3 });
     expect(events.some((e) => e.type === "message_stop")).toBe(true);
   });
 
