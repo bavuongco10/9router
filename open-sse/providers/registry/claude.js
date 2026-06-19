@@ -55,6 +55,7 @@ export default {
     },
     usage: {
       oauthUrl: "https://api.anthropic.com/api/oauth/usage",
+      profileUrl: "https://api.anthropic.com/api/oauth/profile",
       orgUrl: "https://api.anthropic.com/v1/organizations/{org_id}/usage",
       settingsUrl: "https://api.anthropic.com/v1/settings",
     },
