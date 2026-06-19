@@ -3,15 +3,13 @@
 import { useState, useEffect, useCallback } from "react";
 import PropTypes from "prop-types";
 import {
-  ComposedChart,
+  AreaChart,
   Area,
-  Line,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  Legend,
 } from "recharts";
 import Card from "@/shared/components/Card";
 
@@ -23,6 +21,7 @@ const fmtTokens = (n) => {
 
 const fmtCost = (n) => `$${(n || 0).toFixed(4)}`;
 const fmtPct = (n) => `${(n * 100).toFixed(1)}%`;
+const GROUP_COLORS = ["#6366f1", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4", "#f97316", "#84cc16"];
 
 export default function UsageChart({ period = "7d" }) {
   const [data, setData] = useState([]);
@@ -33,7 +32,7 @@ export default function UsageChart({ period = "7d" }) {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/usage/chart?period=${period}`);
+      const res = await fetch(`/api/usage/chart?period=${period}&filterBy=${filterBy}`);
       if (res.ok) {
         const json = await res.json();
         setData(json);
@@ -43,13 +42,15 @@ export default function UsageChart({ period = "7d" }) {
     } finally {
       setLoading(false);
     }
-  }, [period]);
+  }, [period, filterBy]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
-  const hasData = data.some((d) => d.tokens > 0 || d.cost > 0 || d.cachedTokens > 0);
+  const isGrouped = data && data.grouped;
+  const chartData = isGrouped ? data.groups : { all: data };
+  const hasData = isGrouped ? Object.keys(data.groups || {}).length > 0 : data.some((d) => d.tokens > 0 || d.cost > 0 || d.cachedTokens > 0);
 
   return (
     <Card className="flex min-w-0 flex-col gap-3 p-3 sm:p-4">
@@ -102,140 +103,109 @@ export default function UsageChart({ period = "7d" }) {
         <div className="h-48 flex items-center justify-center text-text-muted text-sm">No data for this period</div>
       ) : (
         <ResponsiveContainer width="100%" height={220}>
-          <ComposedChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-            <defs>
-              <linearGradient id="gradTokens" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#6366f1" stopOpacity={0.25} />
-                <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
-              </linearGradient>
-              <linearGradient id="gradCached" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#10b981" stopOpacity={0.25} />
-                <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
-              </linearGradient>
-              <linearGradient id="gradCost" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.25} />
-                <stop offset="95%" stopColor="#f59e0b" stopOpacity={0} />
-              </linearGradient>
-            </defs>
-            <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.1} />
-            <XAxis
-              dataKey="label"
-              tick={{ fontSize: 10, fill: "currentColor", fillOpacity: 0.5 }}
-              tickLine={false}
-              axisLine={false}
-              interval="preserveStartEnd"
-            />
-            <YAxis
-              yAxisId="tokens"
-              tick={{ fontSize: 10, fill: "#6366f1", fillOpacity: 0.85 }}
-              tickLine={false}
-              axisLine={false}
-              yAxisId="tokens"
-              tickFormatter={viewMode === "cost" ? fmtCost : viewMode === "cacheHit" ? fmtPct : fmtTokens}
-              width={50}
-            />
-            <Tooltip
-              cursor={{ stroke: "currentColor", strokeOpacity: 0.15 }}
-              content={({ active, payload, label }) => {
-                if (!active || !payload?.length) return null;
-                const fmt = (key, value) => {
-                  if (key === "tokens" || key === "cachedTokens") return fmtTokens(value);
-                  if (key === "cacheHitRatio") return fmtPct(value);
-                  if (key === "cost") return fmtCost(value);
-                  return value;
-                };
-                const labelFor = (key) => {
-                  if (key === "tokens") return "Tokens";
-                  if (key === "cachedTokens") return "Cached Tokens";
-                  if (key === "cacheHitRatio") return "Cache Hit %";
-                  if (key === "cost") return "Cost";
-                  return key;
-                };
-                return (
-                  <div
-                    className="rounded-md border border-border bg-bg px-3 py-2 text-xs shadow-md"
-                    style={{ color: "var(--color-text-main)" }}
-                  >
-                    <div className="mb-1 font-medium">{label}</div>
-                    {payload.map((p) => (
-                      <div key={p.dataKey} className="flex items-center gap-2">
-                        <span
-                          aria-hidden="true"
-                          className="inline-block h-2 w-2 rounded-sm"
-                          style={{ backgroundColor: p.color || p.stroke }}
-                        />
-                        <span className="text-text-muted">{labelFor(p.dataKey)}</span>
-                        <span className="ml-auto font-mono tabular-nums">
-                          {fmt(p.dataKey, p.value)}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                );
-              }}
-            />
-            {viewMode === "tokens" && (
-              <Area
-                yAxisId="tokens"
-                type="monotone"
-                dataKey="tokens"
-                stroke="#6366f1"
-                strokeWidth={2}
-                fill="url(#gradTokens)"
-                dot={false}
-                activeDot={{ r: 4 }}
+          {(() => {
+            const ThemedTooltip = (
+              <Tooltip
+                cursor={{ stroke: "currentColor", strokeOpacity: 0.15 }}
+                content={({ active, payload, label }) => {
+                  if (!active || !payload?.length) return null;
+                  const fmt = (key, value) => {
+                    if (key === "tokens" || key === "cachedTokens") return fmtTokens(value);
+                    if (key === "cacheHitRatio") return fmtPct(value);
+                    if (key === "cost") return fmtCost(value);
+                    return viewMode === "cost" ? fmtCost(value) : viewMode === "cacheHit" ? fmtPct(value) : fmtTokens(value);
+                  };
+                  const labelFor = (key) => {
+                    if (key === "tokens") return "Tokens";
+                    if (key === "cachedTokens") return "Cached Tokens";
+                    if (key === "cacheHitRatio") return "Cache Hit %";
+                    if (key === "cost") return "Cost";
+                    return key;
+                  };
+                  return (
+                    <div
+                      className="rounded-md border border-border bg-bg px-3 py-2 text-xs shadow-md"
+                      style={{ color: "var(--color-text-main)" }}
+                    >
+                      <div className="mb-1 font-medium">{label}</div>
+                      {payload.map((p) => (
+                        <div key={p.dataKey} className="flex items-center gap-2">
+                          <span
+                            aria-hidden="true"
+                            className="inline-block h-2 w-2 rounded-sm"
+                            style={{ backgroundColor: p.color || p.stroke }}
+                          />
+                          <span className="text-text-muted">{labelFor(p.dataKey)}</span>
+                          <span className="ml-auto font-mono tabular-nums">
+                            {fmt(p.dataKey, p.value)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                }}
               />
-            )}
-            {viewMode === "cached" && (
-              <>
-                <Area
-                  yAxisId="tokens"
-                  type="monotone"
-                  dataKey="tokens"
-                  stroke="#6366f1"
-                  strokeWidth={1}
-                  fill="url(#gradTokens)"
-                  dot={false}
-                  activeDot={{ r: 4 }}
-                  name="tokens"
-                />
-                <Area
-                  yAxisId="tokens"
-                  type="monotone"
-                  dataKey="cachedTokens"
-                  stroke="#10b981"
-                  strokeWidth={2}
-                  fill="url(#gradCached)"
-                  dot={false}
-                  activeDot={{ r: 4 }}
-                />
-              </>
-            )}
-            {viewMode === "cacheHit" && (
-              <Area
-                yAxisId="tokens"
-                type="monotone"
-                dataKey="cacheHitRatio"
-                stroke="#10b981"
-                strokeWidth={2}
-                fill="url(#gradCached)"
-                dot={false}
-                activeDot={{ r: 4 }}
-              />
-            )}
-            {viewMode === "cost" && (
-              <Area
-                yAxisId="tokens"
-                type="monotone"
-                dataKey="cost"
-                stroke="#f59e0b"
-                strokeWidth={2}
-                fill="url(#gradCost)"
-                dot={false}
-                activeDot={{ r: 4 }}
-              />
-            )}
-          </ComposedChart>
+            );
+            if (isGrouped) {
+              const groupNames = Object.keys(chartData);
+              const merged = {};
+              groupNames.forEach((name) => {
+                (chartData[name] || []).forEach((d) => {
+                  if (!merged[d.label]) merged[d.label] = { label: d.label };
+                  merged[d.label][name] = viewMode === "tokens" ? d.tokens : viewMode === "cached" ? d.cachedTokens : viewMode === "cacheHit" ? d.cacheHitRatio : d.cost;
+                });
+              });
+              const mergedArr = Object.values(merged);
+              return (
+                <AreaChart data={mergedArr} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.1} />
+                  <XAxis dataKey="label" tick={{ fontSize: 10, fill: "currentColor", fillOpacity: 0.5 }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+                  <YAxis tick={{ fontSize: 10, fill: "currentColor", fillOpacity: 0.5 }} tickLine={false} axisLine={false} tickFormatter={viewMode === "cost" ? fmtCost : viewMode === "cacheHit" ? fmtPct : fmtTokens} width={50} />
+                  {ThemedTooltip}
+                  {groupNames.map((name, i) => (
+                    <Area key={name} type="monotone" dataKey={name} name={name} stroke={GROUP_COLORS[i % GROUP_COLORS.length]} strokeWidth={2} fill="none" dot={false} activeDot={{ r: 4 }} />
+                  ))}
+                </AreaChart>
+              );
+            }
+            return (
+              <AreaChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="gradTokens" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#6366f1" stopOpacity={0.25} />
+                    <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="gradCached" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.25} />
+                    <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="gradCost" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.25} />
+                    <stop offset="95%" stopColor="#f59e0b" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.1} />
+                <XAxis dataKey="label" tick={{ fontSize: 10, fill: "currentColor", fillOpacity: 0.5 }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+                <YAxis tick={{ fontSize: 10, fill: "currentColor", fillOpacity: 0.5 }} tickLine={false} axisLine={false} tickFormatter={viewMode === "cost" ? fmtCost : viewMode === "cacheHit" ? fmtPct : fmtTokens} width={50} />
+                {ThemedTooltip}
+                {viewMode === "tokens" && (
+                  <Area type="monotone" dataKey="tokens" stroke="#6366f1" strokeWidth={2} fill="url(#gradTokens)" dot={false} activeDot={{ r: 4 }} />
+                )}
+                {viewMode === "cached" && (
+                  <>
+                    <Area type="monotone" dataKey="tokens" stroke="#6366f1" strokeWidth={1} fill="url(#gradTokens)" dot={false} activeDot={{ r: 4 }} name="tokens" />
+                    <Area type="monotone" dataKey="cachedTokens" stroke="#10b981" strokeWidth={2} fill="url(#gradCached)" dot={false} activeDot={{ r: 4 }} />
+                  </>
+                )}
+                {viewMode === "cacheHit" && (
+                  <Area type="monotone" dataKey="cacheHitRatio" stroke="#10b981" strokeWidth={2} fill="url(#gradCached)" dot={false} activeDot={{ r: 4 }} />
+                )}
+                {viewMode === "cost" && (
+                  <Area type="monotone" dataKey="cost" stroke="#f59e0b" strokeWidth={2} fill="url(#gradCost)" dot={false} activeDot={{ r: 4 }} />
+                )}
+              </AreaChart>
+            );
+          })()}
         </ResponsiveContainer>
       )}
     </Card>
