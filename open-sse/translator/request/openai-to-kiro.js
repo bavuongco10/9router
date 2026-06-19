@@ -8,7 +8,7 @@ import { v4 as uuidv4 } from "uuid";
 import { resolveSessionId } from "../../utils/sessionManager.js";
 import {
   resolveKiroModel,
-  isThinkingEnabled,
+  resolveKiroThinkingBudget,
   buildThinkingSystemPrefix,
   KIRO_AGENTIC_SYSTEM_PROMPT,
   resolveDefaultProfileArn
@@ -558,8 +558,8 @@ export function openaiToKiroRequest(model, body, stream, credentials) {
   const temperature = body.temperature;
   const topP = body.top_p;
 
-  const { upstream: upstreamModel, agentic, thinking: modelImpliesThinking } = resolveKiroModel(model);
-  const thinkingEnabled = modelImpliesThinking || isThinkingEnabled(body, null, model);
+  const { upstream: upstreamModel, agentic } = resolveKiroModel(model);
+  const thinkingBudget = resolveKiroThinkingBudget(body, credentials?.rawHeaders, model);
 
   const { history, currentMessage } = convertMessages(messages, tools, upstreamModel);
 
@@ -599,8 +599,8 @@ export function openaiToKiroRequest(model, body, stream, credentials) {
   // then context/timestamp marker. The agentic prompt is one-shot above and
   // is intentionally NOT included here.
   const prefixParts = [];
-  if (thinkingEnabled) {
-    prefixParts.push(buildThinkingSystemPrefix());
+  if (thinkingBudget !== null) {
+    prefixParts.push(buildThinkingSystemPrefix(thinkingBudget));
   }
   prefixParts.push(`[Context: Current time is ${timestamp}]`);
   // Single-turn fallback: no history to fold the agentic prompt into, so

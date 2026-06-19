@@ -1,8 +1,11 @@
-# Unreleased
+# v0.5.4 (2026-06-18)
 
 ## Fixes
-- Codex: default missing reasoning effort to medium and expose GPT 5.5 effort variants for Claude Code CLI configs (#1417)
-- Fix runtime installs in `~/.9router/runtime` pruning sibling packages. The SQLite (`better-sqlite3`) and tray (`systray2`) lazy installs now save to `package.json` instead of passing `--no-save`, so the second install no longer prunes the first.
+- **Kiro**: honor thinking effort budgets
+- **AG/Kiro/Xiaomi**: provider fixes
+- **Combo/Fusion**: flatten tool history in panel calls to prevent 503
+- **LLM selector**: show custom vision models in selector and model list
+- **Image**: prevent compatible nodes from shadowing provider aliases
 
 # v0.5.2 (2026-06-17)
 
