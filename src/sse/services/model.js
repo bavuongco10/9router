@@ -1,7 +1,8 @@
 // Re-export from open-sse with localDb integration
-import { getModelAliases, getComboByName, getProviderNodes } from "@/lib/localDb";
-import { parseModel as parseModelCore, resolveModelAliasFromMap, getModelInfoCore } from "open-sse/services/model.js";
+import { getModelAliases, getComboByName, getProviderNodes, getProviderConnections } from "@/lib/localDb";
+import { parseModel as parseModelCore, resolveModelAliasFromMap, resolveProviderAlias, getModelInfoCore } from "open-sse/services/model.js";
 import REGISTRY from "open-sse/providers/registry/index.js";
+import { FREE_PROVIDERS } from "@/shared/constants/providers";
 
 // Local provider alias overrides (HMR-friendly, applied on top of open-sse map)
 const LOCAL_PROVIDER_ALIASES = {
@@ -79,16 +80,56 @@ export async function getModelInfo(modelStr) {
 }
 
 /**
- * Check if model is a combo and get models list
+ * Pure filter: keep combo entries whose provider alias resolves to one in
+ * `activeProviderIds`. Unknown aliases (custom compat-provider prefixes, model
+ * aliases) are kept — resolving those needs more lookups; downstream handles failure.
+ * Returns { kept, dropped } so callers can log/diagnose.
+ */
+export function partitionComboModelsByProvider(models, activeProviderIds) {
+  const kept = [];
+  const dropped = [];
+  if (!Array.isArray(models)) return { kept, dropped };
+  for (const m of models) {
+    if (typeof m !== "string") { kept.push(m); continue; }
+    const alias = m.includes("/") ? m.slice(0, m.indexOf("/")) : m;
+    if (!RESERVED_PROVIDER_PREFIXES.has(alias)) { kept.push(m); continue; }
+    const providerId = LOCAL_PROVIDER_ALIASES[alias] || resolveProviderAlias(alias);
+    if (activeProviderIds.has(providerId)) kept.push(m);
+    else dropped.push(m);
+  }
+  return { kept, dropped };
+}
+
+/**
+ * Drop combo entries whose provider has no active connection (and isn't a free
+ * no-auth provider). Avoids the wasted call+fall-through when a combo lists a
+ * model on a provider the user has disabled.
+ */
+export async function filterAvailableComboModels(models, log) {
+  if (!Array.isArray(models) || models.length === 0) return models;
+  const connections = await getProviderConnections({ isActive: true });
+  const activeProviderIds = new Set(connections.map((c) => c.provider));
+  for (const [id, p] of Object.entries(FREE_PROVIDERS)) {
+    if (p.noAuth) activeProviderIds.add(id);
+  }
+  const { kept, dropped } = partitionComboModelsByProvider(models, activeProviderIds);
+  if (log?.info && dropped.length) {
+    log.info("COMBO", `skipped ${dropped.length} model(s) on disabled provider: ${dropped.join(", ")}`);
+  }
+  return kept;
+}
+
+/**
+ * Check if model is a combo and get models list (filtered by active providers).
  * @returns {Promise<string[]|null>} Array of models or null if not a combo
  */
-export async function getComboModels(modelStr) {
+export async function getComboModels(modelStr, log) {
   // Only check if it's not in provider/model format
   if (modelStr.includes("/")) return null;
 
   const combo = await getComboByName(modelStr);
   if (combo && combo.models && combo.models.length > 0) {
-    return combo.models;
+    return filterAvailableComboModels(combo.models, log);
   }
   return null;
 }
