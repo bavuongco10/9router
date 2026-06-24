@@ -18,6 +18,7 @@ const FORMAT_TO_NATIVE = {
   vertex: "gemini-budget",
   antigravity: "gemini-budget",
   kiro: "kiro",
+  ollama: "ollama",
 };
 
 // Parse model-name suffix "model(value)" → { cleanModel, override }.
@@ -98,6 +99,10 @@ export const captureThinking = extractThinking;
 
 // Resolve thinking format: provider override > capability > derive(targetFormat).
 function resolveFormat(targetFormat, model, provider) {
+  // Ollama's /api/chat collapses every model family (qwen/deepseek/gpt-oss/…) to
+  // a single `think` boolean, so the wire format wins over the model's own
+  // dialect (e.g. qwen's enable_thinking, which Ollama ignores).
+  if (targetFormat === "ollama") return "ollama";
   const providerFmt = provider ? PROVIDERS[provider]?.thinkingFormat : null;
   if (providerFmt) return providerFmt;
   const caps = getCapabilitiesForModel(provider, model);
@@ -231,6 +236,11 @@ function applyFormat(fmt, body, cfg, caps) {
       if (none && canDisable) break;
       const level = toLevel(eff);
       if (level) body.reasoning_effort = level === "xhigh" || level === "max" ? "high" : level;
+      break;
+    }
+    case "ollama": {
+      // Ollama native /api/chat: `think` is a boolean (qwen3 etc.). No budget/level.
+      body.think = !(none && canDisable);
       break;
     }
     case "kiro":
