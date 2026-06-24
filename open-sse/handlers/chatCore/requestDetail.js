@@ -84,10 +84,15 @@ export function saveUsageStats({ provider, model, tokens, connectionId, apiKey, 
   const accountSuffix = connectionId ? ` | account=${connectionId.slice(0, 8)}...` : "";
   console.log(`${COLORS.green}[${time}] 📊 [${label}] ${provider.toUpperCase()} | in=${inTokens} | out=${outTokens}${accountSuffix}${COLORS.reset}`);
 
-  // Normalize to OpenAI token shape for storage
+  // Normalize to OpenAI token shape for storage. Keep cache/reasoning fields —
+  // dropping them zeroed cacheHitRatio and undercounted cost (cache_creation is
+  // the bulk of Claude spend). saveRequestUsage prices + aggregates these.
   const normalized = {
     prompt_tokens: tokens.prompt_tokens ?? tokens.input_tokens ?? 0,
-    completion_tokens: tokens.completion_tokens ?? tokens.output_tokens ?? 0
+    completion_tokens: tokens.completion_tokens ?? tokens.output_tokens ?? 0,
+    cache_read_input_tokens: tokens.cache_read_input_tokens ?? tokens.cached_tokens ?? 0,
+    cache_creation_input_tokens: tokens.cache_creation_input_tokens ?? 0,
+    reasoning_tokens: tokens.reasoning_tokens ?? 0
   };
 
   saveRequestUsage({
