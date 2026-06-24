@@ -53,6 +53,15 @@ export function openaiToOllamaRequest(model, body, stream) {
     result.tool_choice = body.tool_choice;
   }
 
+  // Forward thinking intent → Ollama native `think` (qwen3 etc.). The request
+  // side otherwise drops it, so provider-level thinking (chatCore injects
+  // body.thinking) never reaches Ollama. Boolean only — qwen3 think is on/off.
+  if (body.thinking?.type === "enabled" || body.reasoning_effort) {
+    result.think = true;
+  } else if (body.thinking?.type === "disabled") {
+    result.think = false;
+  }
+
   return result;
 }
 
