@@ -1,3 +1,5 @@
+import { snakeifyKeys } from "../../shared/utils/snakeKeys.js";
+
 const MICROSOFT_TOKEN_ENDPOINT_HOSTS = new Set([
   "login.microsoftonline.com",
   "login.microsoft.com",
@@ -87,6 +89,10 @@ export function normalizeKiroExternalIdpAuth(rawAuth) {
   if (!input || typeof input !== "object") {
     throw new Error("CLIProxyAPI auth JSON is required");
   }
+
+  // Accept any key casing (refreshToken, RefreshToken, refresh-token) by
+  // normalizing to the snake_case shape read below.
+  input = snakeifyKeys(input);
 
   const authMethod = normalizeString(input.auth_method || input.authMethod);
   if (authMethod && authMethod !== "external_idp") {
