@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { KiroService } from "@/lib/oauth/services/kiro";
 import { createProviderConnection, getProviderConnections } from "@/models";
+import { snakeifyKeys } from "@/shared/utils/snakeKeys";
 
 const MAX_ACCOUNTS = 200;
 
@@ -25,6 +26,9 @@ export async function POST(request) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
+  // Normalize wrapper keys (accounts / overwrite) so { Accounts, Overwrite } etc. work too.
+  if (body && typeof body === "object" && !Array.isArray(body)) body = snakeifyKeys(body);
+
   // Accept either a single account or an array. Also accept { accounts: [...] }
   // for callers that wrap the array.
   let accounts;
@@ -32,6 +36,10 @@ export async function POST(request) {
   else if (Array.isArray(body?.accounts)) accounts = body.accounts;
   else if (body && typeof body === "object") accounts = [body];
   else accounts = [];
+
+  // Accept camelCase / PascalCase keys (refreshToken, RefreshToken, ...) by
+  // normalizing every account's keys to the snake_case shape read below.
+  accounts = accounts.map(snakeifyKeys);
 
   // Filter to plausible Kiro entries (must at least carry a refresh_token).
   accounts = accounts.filter(a => a && a.refresh_token);
