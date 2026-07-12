@@ -77,6 +77,7 @@ function prepareRecord(item) {
     status: item.status || null,
     latency,
     tokens,
+    pxpipe: item.pxpipe || undefined,
   };
 
   // Full (untruncated) bodies live in the offloaded file only.
@@ -232,6 +233,12 @@ export async function getRequestDetails(filter = {}) {
     details,
     pagination: { page, pageSize, totalItems, totalPages, hasNext: page < totalPages, hasPrev: page > 1 },
   };
+}
+
+export async function getDistinctProviders() {
+  const db = await getAdapter();
+  const rows = db.all(`SELECT DISTINCT provider FROM requestDetails WHERE provider IS NOT NULL ORDER BY provider ASC`);
+  return rows.map((r) => r.provider);
 }
 
 // Full detail for the drawer. Heavy bodies come from the offloaded gzip file;

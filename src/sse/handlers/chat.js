@@ -16,6 +16,8 @@ import { getConsistentMachineId } from "@/shared/utils/machineId";
 import { getModelInfo, getComboModels } from "../services/model.js";
 import { handleChatCore } from "open-sse/handlers/chatCore.js";
 import { DEFAULT_HEADROOM_URL } from "@/lib/headroom/detect";
+import { getTransform as getPxpipeTransform } from "@/lib/pxpipe/loader.js";
+import { appendPxpipeEvent } from "@/lib/pxpipe/events.js";
 import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
 import { handleComboChat, handleFusionChat } from "open-sse/services/combo.js";
 import { handleBypassRequest } from "open-sse/utils/bypassHandler.js";
@@ -72,15 +74,9 @@ export async function handleChat(request, clientRawRequest = null) {
   }
   cacheClaudeHeaders(clientRawRequest.headers);
 
-  // Log request endpoint and model
-  const url = new URL(request.url);
   const modelStr = body.model;
 
-  // Count messages (support both messages[] and input[] formats)
-  const msgCount = body.messages?.length || body.input?.length || 0;
-  const toolCount = body.tools?.length || 0;
-  const effort = body.reasoning_effort || body.reasoning?.effort || null;
-  log.request("POST", `${url.pathname} | ${modelStr} | ${msgCount} msgs${toolCount ? ` | ${toolCount} tools` : ""}${effort ? ` | effort=${effort}` : ""}`);
+  // Request summary is emitted as the unified "▶" line in chatCore (has fmt/thinking/account)
 
   // T6 — per-request tool breakdown. Fires before translation so an
   // UNSUPPORTED_TOOL_TYPE 422 still leaves a record of what came in.
@@ -265,12 +261,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
 
   const { provider, model } = modelInfo;
 
-  // Log model routing (alias → actual model)
-  if (modelStr !== `${provider}/${model}`) {
-    log.info("ROUTING", `${modelStr} → ${provider}/${model}`);
-  } else {
-    log.info("ROUTING", `Provider: ${provider}, Model: ${model}`);
-  }
+  // Routing shown in the unified "▶" line (client model → provider/model)
 
   // Extract userAgent from request
   const userAgent = request?.headers?.get("user-agent") || "";
@@ -307,8 +298,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       return errorResponse(lastStatus || HTTP_STATUS.SERVICE_UNAVAILABLE, lastError || "All accounts unavailable");
     }
 
-    // Log account selection
-    log.info("AUTH", `\x1b[32mUsing ${provider} account: ${credentials.connectionName}\x1b[0m`);
+    // Account selection shown in the unified "▶" line (acc:...)
 
     // Per-API-key access rule check (default-deny). All resolved values are
     // known here: provider, model, the picked connectionId, and the output
@@ -367,6 +357,12 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       cavemanLevel: chatSettings.cavemanLevel || "full",
       ponytailEnabled: !!chatSettings.ponytailEnabled,
       ponytailLevel: chatSettings.ponytailLevel || "full",
+      pxpipeEnabled: !!chatSettings.pxpipeEnabled,
+      pxpipeMinChars: chatSettings.pxpipeMinChars,
+      pxpipeTimeoutMs: chatSettings.pxpipeTimeoutMs,
+      // Lazily warms the in-process module on first use; null when not installed (fail-open)
+      pxpipeTransform: chatSettings.pxpipeEnabled ? await getPxpipeTransform() : null,
+      onPxpipeEvent: appendPxpipeEvent,
       providerThinking,
       // Detect source format by endpoint + body
       sourceFormatOverride: request?.url ? detectFormatByEndpoint(new URL(request.url).pathname, body) : null,
@@ -388,7 +384,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
     const { shouldFallback } = await markAccountUnavailable(credentials.connectionId, result.status, result.error, provider, model, result.resetsAtMs);
 
     if (shouldFallback) {
-      log.warn("AUTH", `Account ${credentials.connectionName} unavailable (${result.status}), trying fallback`);
+      log.warn("FALLBACK", `⇄ ACC:${credentials.connectionName} UNAVAILABLE (${result.status}) → NEXT ACCOUNT`);
       excludeConnectionIds.add(credentials.connectionId);
       lastError = result.error;
       lastStatus = result.status;
