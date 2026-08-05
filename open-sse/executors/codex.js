@@ -116,9 +116,10 @@ function normalizeCodexTools(body) {
   }
 }
 
-// Codex Responses backend accepts `additional_tools` items, but only with { type, tools }.
-// Some clients (e.g. Claude Code programmatic tool-calling) also attach role + content, which
-// the backend rejects with "Unknown parameter: 'input[0].content'". Keep only type + tools;
+// Codex Responses backend accepts `additional_tools` items with { type, role, tools }.
+// It requires `role` ("Missing required parameter: 'input[0].role'") but rejects `content`
+// ("Unknown parameter: 'input[0].content'") — Claude Code programmatic tool-calling sends
+// both. Keep type/role/tools, strip everything else, default role to developer if absent;
 // drop the item if it carries no usable tools array.
 function normalizeAdditionalToolsItems(body) {
   if (!Array.isArray(body.input)) return;
@@ -126,8 +127,9 @@ function normalizeAdditionalToolsItems(body) {
     if (!item || typeof item !== "object" || item.type !== "additional_tools") return true;
     if (!Array.isArray(item.tools) || item.tools.length === 0) return false;
     for (const k of Object.keys(item)) {
-      if (k !== "type" && k !== "tools") delete item[k];
+      if (k !== "type" && k !== "tools" && k !== "role") delete item[k];
     }
+    if (typeof item.role !== "string" || !item.role) item.role = "developer";
     return true;
   });
 }
