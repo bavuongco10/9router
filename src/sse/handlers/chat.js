@@ -81,7 +81,8 @@ export async function handleChat(request, clientRawRequest = null) {
   // Categories: typedA (server-executed Anthropic built-ins), typedB
   // (client-executed Anthropic built-ins), custom (no `type` or `type:custom`/
   // `type:function`), unknown (typed shape with a `type` not in the registry).
-  if (toolCount > 0 && Array.isArray(body.tools)) {
+  const toolCount = Array.isArray(body.tools) ? body.tools.length : 0;
+  if (toolCount > 0) {
     let typedA = 0, typedB = 0, custom = 0, unknown = 0;
     const sampleTypes = [];
     for (const tool of body.tools) {
