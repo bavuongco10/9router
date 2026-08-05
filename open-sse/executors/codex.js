@@ -8,6 +8,7 @@ import {
 import { normalizeResponsesInput } from "../translator/formats/responsesApi.js";
 import { fetchImageAsBase64 } from "../translator/concerns/image.js";
 import { getModelUpstreamId } from "../config/providerModels.js";
+import { getThinkingLevels } from "../providers/thinkingLevels.js";
 import { DEFAULT_RETRY_CONFIG, HTTP_STATUS, resolveRetryEntry } from "../config/runtimeConfig.js";
 import { dbg } from "../utils/debugLog.js";
 import { resolveSessionId } from "../utils/sessionManager.js";
@@ -126,8 +127,12 @@ function resolveCacheSessionId(body, credentials) {
   });
 }
 
-function normalizeReasoningEffort(value) {
-  return value === "max" ? "xhigh" : value;
+function normalizeReasoningEffort(model, value) {
+  const supportedLevels = getThinkingLevels("codex", model);
+  if (supportedLevels?.includes(value)) return value;
+  if (value === "ultra" && supportedLevels?.includes("max")) return "max";
+  if (value === "max" || value === "ultra") return "xhigh";
+  return value;
 }
 
 function findNestedMessage(value, depth = 0) {
@@ -444,10 +449,10 @@ export class CodexExecutor extends BaseExecutor {
     if (!body.reasoning) {
       // #1417: Claude Code does not always send reasoning_effort, so keep
       // Codex requests at the documented medium default unless configured.
-      const effort = normalizeReasoningEffort(body.reasoning_effort || modelEffort || CODEX_DEFAULT_REASONING_EFFORT);
+      const effort = normalizeReasoningEffort(body.model, body.reasoning_effort || modelEffort || CODEX_DEFAULT_REASONING_EFFORT);
       body.reasoning = { effort, summary: "auto" };
     } else {
-      body.reasoning.effort = normalizeReasoningEffort(body.reasoning.effort);
+      body.reasoning.effort = normalizeReasoningEffort(body.model, body.reasoning.effort);
       if (!body.reasoning.summary) body.reasoning.summary = "auto";
     }
     delete body.reasoning_effort;
