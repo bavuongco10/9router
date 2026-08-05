@@ -24,9 +24,13 @@ const SPECIALIZED = new Set([
 ]);
 
 // Sanitize header: khử token + field thời gian động (kimi X-Msh-Device-Id) để snapshot ổn định.
+// Kimi cũng phát X-Msh-Device-Name (os.hostname) + X-Msh-Device-Model (os type/arch) — khử theo
+// key để golden portable across machines/CI (khác host/OS không làm fail).
+const MACHINE_SPECIFIC = { "X-Msh-Device-Name": "<HOST>", "X-Msh-Device-Model": "<MODEL>" };
 function sanitize(headers) {
   const out = {};
   for (const [k, v] of Object.entries(headers)) {
+    if (Object.prototype.hasOwnProperty.call(MACHINE_SPECIFIC, k)) { out[k] = MACHINE_SPECIFIC[k]; continue; }
     out[k] = typeof v === "string"
       ? v.replace(/Bearer .+/, "Bearer <TOK>")
           .replace(/sk-test-APIKEY|tok-test-ACCESS/g, "<CRED>")

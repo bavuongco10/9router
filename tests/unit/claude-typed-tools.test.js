@@ -188,7 +188,9 @@ describe("DefaultExecutor.buildHeaders — anthropic-beta merge", () => {
       _extraBetaFlags: ["web-search-2025-03-05", "computer-use-2025-01-24"],
     };
 
-    const headers = exec.buildHeaders({ apiKey: "test-key" }, true, body);
+    // Reconciled signature post-upstream-merge: buildHeaders(credentials, stream, url, model, body).
+    // model drives the base anthropic-beta (selectAnthropicBeta) that the per-tool flags union onto.
+    const headers = exec.buildHeaders({ apiKey: "test-key" }, true, "", "claude-opus-4-7", body);
 
     const beta = headers["anthropic-beta"] || headers["Anthropic-Beta"];
     expect(beta).toBeDefined();
