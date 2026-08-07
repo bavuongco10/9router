@@ -709,7 +709,7 @@ export async function getAccountModelChartData(period = "7d") {
     bucketMs = 86400000;
     const t = new Date(); t.setHours(0, 0, 0, 0);
     startTime = t.getTime() - (bucketCount - 1) * bucketMs;
-    labelFn = (i) => new Date(startTime + i * bucketMs).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    labelFn = (i) => new Date(startTime + i * bucketMs).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
   }
 
   const rows = db.all(
