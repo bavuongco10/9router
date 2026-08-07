@@ -685,7 +685,64 @@ export async function getUsageStats(period = "all") {
   return stats;
 }
 
+// Per-account, per-day, per-model token buckets for the Quota Tracker mini
+// charts (stacked-by-model). The daily summary collapses models within an
+// account, so this reads usageHistory directly. Returns:
+//   { grouped, filterBy:"accountModel", groups: { <connId>: { models, data } } }
+// where data[i] = { label, "<model> (<provider>)": tokens, ... }.
+export async function getAccountModelChartData(period = "7d") {
+  const db = await getAdapter();
+  const now = Date.now();
+
+  let bucketCount, bucketMs, startTime, labelFn;
+  if (period === "today" || period === "24h") {
+    bucketCount = 24;
+    bucketMs = 3600000;
+    if (period === "today") {
+      const s = new Date(); s.setHours(0, 0, 0, 0); startTime = s.getTime();
+    } else {
+      startTime = now - bucketCount * bucketMs;
+    }
+    labelFn = (i) => new Date(startTime + i * bucketMs).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
+  } else {
+    bucketCount = period === "30d" ? 30 : period === "60d" ? 60 : 7;
+    bucketMs = 86400000;
+    const t = new Date(); t.setHours(0, 0, 0, 0);
+    startTime = t.getTime() - (bucketCount - 1) * bucketMs;
+    labelFn = (i) => new Date(startTime + i * bucketMs).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  }
+
+  const rows = db.all(
+    `SELECT timestamp, promptTokens, completionTokens, connectionId, model, provider FROM usageHistory WHERE timestamp >= ? AND connectionId IS NOT NULL`,
+    [new Date(startTime).toISOString()]
+  );
+
+  const groups = {}; // connId -> { models:Set, buckets:[{label, [modelKey]:tokens}] }
+  for (const r of rows) {
+    const idx = Math.min(Math.floor((new Date(r.timestamp).getTime() - startTime) / bucketMs), bucketCount - 1);
+    if (idx < 0) continue;
+    const connId = r.connectionId;
+    const modelKey = r.provider ? `${r.model} (${r.provider})` : (r.model || "unknown");
+    if (!groups[connId]) {
+      groups[connId] = {
+        models: new Set(),
+        buckets: Array.from({ length: bucketCount }, (_, i) => ({ label: labelFn(i) })),
+      };
+    }
+    groups[connId].models.add(modelKey);
+    const b = groups[connId].buckets[idx];
+    b[modelKey] = (b[modelKey] || 0) + (r.promptTokens || 0) + (r.completionTokens || 0);
+  }
+
+  const out = {};
+  for (const [connId, g] of Object.entries(groups)) {
+    out[connId] = { models: [...g.models], data: g.buckets };
+  }
+  return { grouped: true, filterBy: "accountModel", groups: out };
+}
+
 export async function getChartData(period = "7d", filterBy = "all") {
+  if (filterBy === "accountModel") return getAccountModelChartData(period);
   const db = await getAdapter();
   const now = Date.now();
   const isGrouped = filterBy !== "all";

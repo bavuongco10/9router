@@ -480,11 +480,11 @@ export default function ProviderLimits() {
     };
   }, []);
 
-  // Weekly (7-day) per-account token usage for the per-tile mini charts.
-  // API already groups by connectionId; refetch in step with quota refreshes.
+  // Weekly (7-day) per-account token usage, broken down by model, for the
+  // per-tile stacked mini charts. Refetch in step with quota refreshes.
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/usage/chart?period=7d&filterBy=account", { cache: "no-store" })
+    fetch("/api/usage/chart?period=7d&filterBy=accountModel", { cache: "no-store" })
       .then((res) => res.json())
       .then((data) => {
         if (!cancelled && data?.grouped) setWeeklyUsage(data.groups || {});

@@ -15,13 +15,26 @@ const fmtTokens = (n) => {
   return String(n || 0);
 };
 
-// Does this 7-day series have any usage worth charting?
-export function hasUsage(data) {
-  return Array.isArray(data) && data.some((d) => (d?.tokens || 0) > 0);
+const COLORS = ["#6366f1", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4", "#f97316", "#84cc16"];
+
+// Does this account's 7-day breakdown have any usage worth charting?
+export function hasUsage(entry) {
+  return (
+    entry &&
+    Array.isArray(entry.data) &&
+    Array.isArray(entry.models) &&
+    entry.models.length > 0 &&
+    entry.data.some((d) => entry.models.some((m) => (d[m] || 0) > 0))
+  );
 }
 
-// Compact weekly (7-day) token usage for a single account, sized to sit
-// inside an account tile: full width, fixed short height, no Y axis.
+// Compact weekly (7-day) token usage for a single account, each day's bar
+// stacked by model. Sized to sit inside an account tile: full width, short
+// fixed height, no Y axis; model names live in the hover tooltip to keep the
+// tile short (a persistent legend would grow it).
+// ponytail: model→color mapping is positional per-tile (index in this
+// account's models[]), so the same model may differ in color across tiles.
+// Upgrade to a shared model→color map if cross-tile consistency is wanted.
 export default function AccountUsageMiniChart({ data }) {
   if (!hasUsage(data)) {
     return (
@@ -31,14 +44,16 @@ export default function AccountUsageMiniChart({ data }) {
     );
   }
 
+  const { models, data: series } = data;
+
   return (
     <div className="mt-2 min-w-0 border-t border-black/5 pt-2 dark:border-white/5">
       <p className="mb-1 text-[10px] font-medium text-text-muted">
-        Last 7 days · tokens
+        Last 7 days · tokens by model
       </p>
-      <ResponsiveContainer width="100%" height={56}>
+      <ResponsiveContainer width="100%" height={64}>
         <BarChart
-          data={data}
+          data={series}
           margin={{ top: 2, right: 0, left: 0, bottom: 0 }}
           barCategoryGap="20%"
         >
@@ -53,25 +68,50 @@ export default function AccountUsageMiniChart({ data }) {
             cursor={{ fill: "currentColor", fillOpacity: 0.06 }}
             content={({ active, payload, label }) => {
               if (!active || !payload?.length) return null;
+              const rows = payload
+                .filter((p) => (p.value || 0) > 0)
+                .sort((a, b) => b.value - a.value);
+              if (!rows.length) return null;
+              const total = rows.reduce((s, p) => s + p.value, 0);
               return (
                 <div
-                  className="rounded-md border border-border bg-bg px-2 py-1 text-[11px] shadow-md"
+                  className="max-w-[220px] rounded-md border border-border bg-bg px-2 py-1 text-[11px] shadow-md"
                   style={{ color: "var(--color-text-main)" }}
                 >
-                  <div className="font-medium">{label}</div>
-                  <div className="font-mono tabular-nums">
-                    {fmtTokens(payload[0].value)} tokens
+                  <div className="mb-0.5 font-medium">{label}</div>
+                  {rows.map((p) => (
+                    <div key={p.dataKey} className="flex items-center gap-1.5">
+                      <span
+                        aria-hidden="true"
+                        className="inline-block h-2 w-2 shrink-0 rounded-sm"
+                        style={{ backgroundColor: p.color || p.fill }}
+                      />
+                      <span className="truncate">{p.dataKey}</span>
+                      <span className="ml-auto font-mono tabular-nums">
+                        {fmtTokens(p.value)}
+                      </span>
+                    </div>
+                  ))}
+                  <div className="mt-0.5 flex border-t border-black/10 pt-0.5 dark:border-white/10">
+                    <span className="text-text-muted">Total</span>
+                    <span className="ml-auto font-mono tabular-nums">
+                      {fmtTokens(total)}
+                    </span>
                   </div>
                 </div>
               );
             }}
           />
-          <Bar
-            dataKey="tokens"
-            fill="#6366f1"
-            radius={[2, 2, 0, 0]}
-            isAnimationActive={false}
-          />
+          {models.map((m, i) => (
+            <Bar
+              key={m}
+              dataKey={m}
+              stackId="a"
+              fill={COLORS[i % COLORS.length]}
+              radius={i === models.length - 1 ? [2, 2, 0, 0] : 0}
+              isAnimationActive={false}
+            />
+          ))}
         </BarChart>
       </ResponsiveContainer>
     </div>
@@ -79,5 +119,8 @@ export default function AccountUsageMiniChart({ data }) {
 }
 
 AccountUsageMiniChart.propTypes = {
-  data: PropTypes.arrayOf(PropTypes.object),
+  data: PropTypes.shape({
+    models: PropTypes.arrayOf(PropTypes.string),
+    data: PropTypes.arrayOf(PropTypes.object),
+  }),
 };
