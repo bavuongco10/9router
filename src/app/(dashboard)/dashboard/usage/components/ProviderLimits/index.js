@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import Link from "next/link";
 import ProviderIcon from "@/shared/components/ProviderIcon";
 import QuotaTable from "./QuotaTable";
+import AccountUsageMiniChart from "./AccountUsageMiniChart";
 import Toggle from "@/shared/components/Toggle";
 import Tooltip from "@/shared/components/Tooltip";
 import {
@@ -134,6 +135,7 @@ export default function ProviderLimits() {
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [autoPingMaps, setAutoPingMaps] = useState({ claude: {}, codex: {} });
   const [lastUpdated, setLastUpdated] = useState(null);
+  const [weeklyUsage, setWeeklyUsage] = useState({});
   const [hasHydratedAutoRefresh, setHasHydratedAutoRefresh] = useState(false);
   const [refreshingAll, setRefreshingAll] = useState(false);
   const [countdown, setCountdown] = useState(60);
@@ -477,6 +479,21 @@ export default function ProviderLimits() {
       cancelled = true;
     };
   }, []);
+
+  // Weekly (7-day) per-account token usage for the per-tile mini charts.
+  // API already groups by connectionId; refetch in step with quota refreshes.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/usage/chart?period=7d&filterBy=account", { cache: "no-store" })
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled && data?.grouped) setWeeklyUsage(data.groups || {});
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [lastUpdated]);
 
   const refreshAll = useCallback(async (force = false) => {
     if (refreshingAll) return;
@@ -1332,6 +1349,7 @@ export default function ProviderLimits() {
                     </div>
                   </div>
                 )}
+                <AccountUsageMiniChart data={weeklyUsage[conn.id]} />
               </div>
             </Card>
           );
