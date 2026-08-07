@@ -46,14 +46,30 @@ export default function AccountUsageMiniChart({ data }) {
 
   const { models, data: series } = data;
 
+  // Pseudo-log stack: recharts can't put a stacked bar on a real log axis
+  // (log(0) = -∞), so scale each bar's total to log10(total) and split that
+  // height across models by their real share. Keeps a 2k day visible next to
+  // a 2M one; __real carries the true token counts for the tooltip.
+  // ponytail: not a true log axis (tick values are meaningless, so no Y axis).
+  // Upgrade to a real log axis only if we drop stacking.
+  const scaled = series.map((d) => {
+    const real = {};
+    let total = 0;
+    for (const m of models) { const v = d[m] || 0; real[m] = v; total += v; }
+    const factor = total > 0 ? Math.log10(total + 1) / total : 0;
+    const out = { label: d.label, __real: real };
+    for (const m of models) out[m] = (d[m] || 0) * factor;
+    return out;
+  });
+
   return (
     <div className="mt-2 min-w-0 border-t border-black/5 pt-2 dark:border-white/5">
       <p className="mb-1 text-[10px] font-medium text-text-muted">
-        Last 7 days · tokens by model
+        Last 7 days · tokens by model (log)
       </p>
       <ResponsiveContainer width="100%" height={64}>
         <BarChart
-          data={series}
+          data={scaled}
           margin={{ top: 2, right: 0, left: 0, bottom: 0 }}
           barCategoryGap="20%"
         >
@@ -68,27 +84,29 @@ export default function AccountUsageMiniChart({ data }) {
             cursor={{ fill: "currentColor", fillOpacity: 0.06 }}
             content={({ active, payload, label }) => {
               if (!active || !payload?.length) return null;
+              const real = payload[0]?.payload?.__real || {};
               const rows = payload
-                .filter((p) => (p.value || 0) > 0)
+                .map((p) => ({ key: p.dataKey, color: p.color || p.fill, value: real[p.dataKey] || 0 }))
+                .filter((r) => r.value > 0)
                 .sort((a, b) => b.value - a.value);
               if (!rows.length) return null;
-              const total = rows.reduce((s, p) => s + p.value, 0);
+              const total = rows.reduce((s, r) => s + r.value, 0);
               return (
                 <div
                   className="max-w-[220px] rounded-md border border-border bg-bg px-2 py-1 text-[11px] shadow-md"
                   style={{ color: "var(--color-text-main)" }}
                 >
                   <div className="mb-0.5 font-medium">{label}</div>
-                  {rows.map((p) => (
-                    <div key={p.dataKey} className="flex items-center gap-1.5">
+                  {rows.map((r) => (
+                    <div key={r.key} className="flex items-center gap-1.5">
                       <span
                         aria-hidden="true"
                         className="inline-block h-2 w-2 shrink-0 rounded-sm"
-                        style={{ backgroundColor: p.color || p.fill }}
+                        style={{ backgroundColor: r.color }}
                       />
-                      <span className="truncate">{p.dataKey}</span>
+                      <span className="truncate">{r.key}</span>
                       <span className="ml-auto font-mono tabular-nums">
-                        {fmtTokens(p.value)}
+                        {fmtTokens(r.value)}
                       </span>
                     </div>
                   ))}
