@@ -108,7 +108,7 @@ export default function AccountUsageMiniChart({ data }) {
               dataKey={m}
               stackId="a"
               fill={COLORS[i % COLORS.length]}
-              radius={i === models.length - 1 ? [2, 2, 0, 0] : 0}
+              radius={i === models.length - 1 ? [4, 4, 0, 0] : 0}
               isAnimationActive={false}
             />
           ))}
