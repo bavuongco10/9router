@@ -349,6 +349,20 @@ export default function ProviderLimits() {
     }
   }, []);
 
+  const copyConnection = useCallback(
+    async (id) => {
+      try {
+        const res = await fetch(`/api/providers/${id}/export`, { cache: "no-store" });
+        if (!res.ok) return;
+        const data = await res.json();
+        copy(JSON.stringify(data.connection, null, 2), `share-${id}`);
+      } catch (error) {
+        console.error("Error copying connection:", error);
+      }
+    },
+    [copy],
+  );
+
   const handleDeleteConnection = useCallback(
     async (id) => {
       if (!confirm("Delete this connection?")) return;
@@ -1200,6 +1214,19 @@ export default function ProviderLimits() {
                           className={`material-symbols-outlined text-[18px] text-text-muted ${isLoading ? "animate-spin" : ""}`}
                         >
                           refresh
+                        </span>
+                      </button>
+                    </Tooltip>
+                    <Tooltip text="Copy connection (tokens included) to share with another 9router">
+                      <button
+                        type="button"
+                        onClick={() => copyConnection(conn.id)}
+                        disabled={rowBusy}
+                        aria-label="Copy connection"
+                        className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-black/5 dark:hover:bg-white/5 text-text-muted hover:text-primary transition-colors disabled:opacity-50"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">
+                          {copied === `share-${conn.id}` ? "check" : "content_copy"}
                         </span>
                       </button>
                     </Tooltip>

@@ -23,6 +23,7 @@ import AddApiKeyModal from "./AddApiKeyModal";
 import EditCompatibleNodeModal from "./EditCompatibleNodeModal";
 import AddCustomModelModal from "./AddCustomModelModal";
 import BulkImportCodexModal from "./BulkImportCodexModal";
+import ImportConnectionModal from "./ImportConnectionModal";
 
 const ONE_BY_ONE_DELAY_MS = 1000;
 
@@ -52,6 +53,7 @@ export default function ProviderDetailPage() {
   const [showAddApiKeyModal, setShowAddApiKeyModal] = useState(false);
   const [addConnectionError, setAddConnectionError] = useState("");
   const [showBulkImportCodex, setShowBulkImportCodex] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showTestModelModal, setShowTestModelModal] = useState(false);
   const [testModelConnectionId, setTestModelConnectionId] = useState(null);
@@ -737,6 +739,17 @@ export default function ProviderDetailPage() {
     });
   };
 
+  const handleCopyConnection = async (id) => {
+    try {
+      const res = await fetch(`/api/providers/${id}/export`, { cache: "no-store" });
+      if (!res.ok) return;
+      const data = await res.json();
+      copy(JSON.stringify(data.connection, null, 2), id);
+    } catch (error) {
+      console.log("Error copying connection:", error);
+    }
+  };
+
   const handleBulkDelete = () => {
     const count = selectedConnectionIds.length;
     if (count === 0) return;
@@ -1023,6 +1036,8 @@ export default function ProviderDetailPage() {
                   setTestModelConnectionId(conn.id);
                   setShowTestModelModal(true);
                 }}
+                onCopy={() => handleCopyConnection(conn.id)}
+                copied={copied === conn.id}
                 oneByOneStatus={oneByOneResults[conn.id] || null}
               />
             </div>
@@ -1570,6 +1585,11 @@ export default function ProviderDetailPage() {
                         {translate("Bulk Add")}
                       </Button>
                     )}
+                    {!isCompatible && (
+                      <Button size="sm" icon="content_paste" variant="secondary" onClick={() => setShowImportModal(true)} title="Paste a connection copied from another 9router">
+                        Import
+                      </Button>
+                    )}
                     <Button
                       size="sm"
                       icon="add"
@@ -1639,6 +1659,16 @@ export default function ProviderDetailPage() {
                       {translate("Bulk Add")}
                     </Button>
                   )}
+                  <Button
+                    size="sm"
+                    icon="content_paste"
+                    variant="secondary"
+                    onClick={() => setShowImportModal(true)}
+                    title="Paste a connection copied from another 9router"
+                    className="w-full sm:w-auto"
+                  >
+                    Import
+                  </Button>
                   {hasDualAuthModes ? (
                     <>
                       <Button
@@ -1831,6 +1861,12 @@ export default function ProviderDetailPage() {
           onSuccess={fetchConnections}
         />
       )}
+
+      <ImportConnectionModal
+        isOpen={showImportModal}
+        onClose={() => setShowImportModal(false)}
+        onSuccess={fetchConnections}
+      />
 
       {/* AG Risk Confirmation Modal */}
       <ConfirmModal
