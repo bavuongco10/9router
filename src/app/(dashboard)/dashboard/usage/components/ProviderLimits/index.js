@@ -1073,7 +1073,7 @@ export default function ProviderLimits() {
               key={conn.id}
               padding="none"
               style={{ borderRadius: 18 }}
-              className={`min-w-0 overflow-hidden ${isInactive ? "opacity-60" : ""}`}
+              className={`min-w-0 ${isInactive ? "opacity-60" : ""}`}
             >
               <div className="px-3 py-2 border-b border-black/10 dark:border-white/10">
                 <div className="flex items-center justify-between gap-2">
