@@ -1073,7 +1073,7 @@ export default function ProviderLimits() {
               key={conn.id}
               padding="none"
               style={{ borderRadius: 18 }}
-              className={`min-w-0 ${isInactive ? "opacity-60" : ""}`}
+              className={`flex h-full min-w-0 flex-col ${isInactive ? "opacity-60" : ""}`}
             >
               <div className="px-3 py-2 border-b border-black/10 dark:border-white/10">
                 <div className="flex items-center justify-between gap-2">
@@ -1300,7 +1300,7 @@ export default function ProviderLimits() {
                 </div>
               </div>
 
-              <div className="px-2 py-1.5">
+              <div className="flex flex-1 flex-col px-2 py-1.5">
                 {isLoading ? (
                   <div className="text-center py-5 text-text-muted">
                     <span className="material-symbols-outlined text-[28px] animate-spin">
@@ -1350,7 +1350,9 @@ export default function ProviderLimits() {
                     </div>
                   </div>
                 )}
-                <AccountUsageMiniChart data={weeklyUsage[conn.id]} />
+                <div className="mt-auto">
+                  <AccountUsageMiniChart data={weeklyUsage[conn.id]} />
+                </div>
               </div>
             </Card>
           );
