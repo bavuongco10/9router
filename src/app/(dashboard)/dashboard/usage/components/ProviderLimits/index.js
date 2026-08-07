@@ -1087,7 +1087,7 @@ export default function ProviderLimits() {
                         {quota?.tier ? (
                           <span
                             className="shrink-0 rounded-full border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-primary"
-                            title={`Claude account tier: ${quota.tier}`}
+                            title={`${conn.provider} account tier: ${quota.tier}`}
                           >
                             {quota.tier}
                           </span>

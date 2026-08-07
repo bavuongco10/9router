@@ -12,6 +12,28 @@ const CODEX_CONFIG = {
   resetCreditsConsumeUrl: U("codex").resetCreditsConsumeUrl,
 };
 
+// Codex "tier" == ChatGPT plan. Same concept as the Claude tier badge.
+// Source: data.plan_type from /wham/usage, or the chatgpt_plan_type JWT claim
+// (https://api.openai.com/auth) as a no-network fallback — the way Codex CLI reads it.
+// `prolite` is the Pro $100 (5x) tier (openai/codex#17353) — mapped explicitly.
+const CODEX_TIER_LABELS = {
+  free: "Free", go: "Go", plus: "Plus", pro: "Pro", prolite: "Pro 5×",
+  team: "Team", business: "Business", enterprise: "Enterprise", edu: "Edu",
+};
+function formatCodexTier(planType) {
+  if (!planType || typeof planType !== "string") return null;
+  return CODEX_TIER_LABELS[planType.toLowerCase()] ?? planType;
+}
+function tierFromJwt(token) {
+  if (!token || typeof token !== "string") return null;
+  try {
+    const payload = JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString());
+    return formatCodexTier(payload["https://api.openai.com/auth"]?.chatgpt_plan_type);
+  } catch {
+    return null;
+  }
+}
+
 function toIsoDate(value) {
   if (!value) return null;
   const date = value instanceof Date
@@ -91,7 +113,10 @@ export async function getCodexUsage(accessToken, proxyOptions = null) {
     }, proxyOptions);
 
     if (!response.ok) {
-      return { message: `Codex connected. Usage API temporarily unavailable (${response.status}).` };
+      return {
+        tier: tierFromJwt(accessToken),
+        message: `Codex connected. Usage API temporarily unavailable (${response.status}).`,
+      };
     }
 
     const data = await response.json();
@@ -105,6 +130,7 @@ export async function getCodexUsage(accessToken, proxyOptions = null) {
 
     return {
       plan: data.plan_type || data.summary?.plan || "unknown",
+      tier: formatCodexTier(data.plan_type) ?? tierFromJwt(accessToken),
       limitReached: getCodexRateLimitBody(normalRateLimit)?.limit_reached || false,
       reviewLimitReached: getCodexRateLimitBody(reviewRateLimit)?.limit_reached || false,
       resetCredits: { availableCount: availableResetCredits },
