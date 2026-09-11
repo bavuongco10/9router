@@ -80,11 +80,13 @@ function installRuntimePackages(pkgs, {
   label = "runtime package",
   failureTitle = "Runtime package install failed",
   failureHint = "runtime dependency unavailable",
+  ignoreScripts = false,
 } = {}) {
   const cwd = ensureRuntimeDir();
   if (!silent) console.log(`⏳ Installing ${label} (first run)...`);
 
-  const res = runNpmInstall({ cwd, pkgs, timeout });
+  const extraArgs = ignoreScripts ? ["--ignore-scripts"] : [];
+  const res = runNpmInstall({ cwd, pkgs, extraArgs, timeout });
   if (!res.ok && !silent) {
     const reason = summarizeNpmError(res.stderr);
     console.warn(`⚠️  ${failureTitle}`);

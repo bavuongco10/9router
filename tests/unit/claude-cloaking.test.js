@@ -363,3 +363,44 @@ describe("Claude passthrough cloak/decloak symmetry", () => {
     expect(JSON.stringify(result)).not.toMatch(/_ide/);
   });
 });
+
+describe("decloakStreamChunk", () => {
+  // Cloaked exactly as cloakClaudeTools() does on the request side
+  const toolNameMap = new Map([["run_code" + CLAUDE_TOOL_SUFFIX, "run_code"]]);
+
+  const toolUseStart = (name) => ({
+    type: "content_block_start",
+    index: 1,
+    content_block: { type: "tool_use", id: "toolu_01abc", name, input: {} }
+  });
+
+  it("restores the original name on a tool_use content_block_start", () => {
+    const out = decloakStreamChunk(toolUseStart("run_code" + CLAUDE_TOOL_SUFFIX), toolNameMap);
+    expect(out.content_block.name).toBe("run_code");
+  });
+
+  it("does not mutate the input chunk", () => {
+    const chunk = toolUseStart("run_code" + CLAUDE_TOOL_SUFFIX);
+    decloakStreamChunk(chunk, toolNameMap);
+    expect(chunk.content_block.name).toBe("run_code" + CLAUDE_TOOL_SUFFIX);
+  });
+
+  it("passes through names the map does not know (e.g. decoy tools)", () => {
+    const chunk = toolUseStart("Bash");
+    expect(decloakStreamChunk(chunk, toolNameMap)).toBe(chunk);
+  });
+
+  it("passes through non-tool_use events unchanged", () => {
+    const textStart = { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } };
+    expect(decloakStreamChunk(textStart, toolNameMap)).toBe(textStart);
+
+    const delta = { type: "content_block_delta", index: 1, delta: { type: "input_json_delta", partial_json: "{}" } };
+    expect(decloakStreamChunk(delta, toolNameMap)).toBe(delta);
+  });
+
+  it("tolerates null chunks and missing maps (stream flush path)", () => {
+    expect(decloakStreamChunk(null, toolNameMap)).toBeNull();
+    expect(decloakStreamChunk(toolUseStart("run_code" + CLAUDE_TOOL_SUFFIX), null).content_block.name).toBe("run_code" + CLAUDE_TOOL_SUFFIX);
+    expect(decloakStreamChunk(toolUseStart("run_code" + CLAUDE_TOOL_SUFFIX), new Map()).content_block.name).toBe("run_code" + CLAUDE_TOOL_SUFFIX);
+  });
+});

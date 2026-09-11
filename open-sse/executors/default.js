@@ -174,8 +174,15 @@ export class DefaultExecutor extends BaseExecutor {
     for (const hook of desc.hooks || []) HEADER_HOOKS[hook]?.(headers, credentials);
     applyAuth(headers, desc, credentials);
 
-    // Model-gated base anthropic-beta (upstream): only betas the target Claude model supports.
-    if (this.provider === "claude" && model) {
+    // Model-gated base anthropic-beta: only betas the target Claude model supports.
+    // Also apply to anthropic-compatible-* nodes fronting a real Claude model
+    // (rotating multi-account proxies, corporate gateways) — without
+    // `context-management-2025-06-27` upstream rejects the `context_management`
+    // block Claude Code sends and the combo silently falls through. The model id
+    // gates this: nodes fronting Kimi/GLM answer on their own ids and never match.
+    const isClaudeModel = typeof model === "string" && /^claude-/.test(model);
+    if (model && (this.provider === "claude"
+      || (this.provider?.startsWith?.("anthropic-compatible-") && isClaudeModel))) {
       headers["Anthropic-Beta"] = selectAnthropicBeta(model);
     }
 
