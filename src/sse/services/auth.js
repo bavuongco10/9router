@@ -348,7 +348,7 @@ export async function markAccountUnavailable(connectionId, status, errorText, pr
   // Persist the FULL upstream error so the UI can show it verbatim; keep a
   // short form only for the concise console/log lines below.
   const fullError = typeof errorText === "string" ? errorText : "Provider error";
-  const reason = fullError.slice(0, 100);
+  const reason = fullError.slice(0, 200);
   const lockUpdate = buildModelLockUpdate(githubResetAtMs ? null : model, cooldownMs);
 
   await updateProviderConnection(connectionId, {

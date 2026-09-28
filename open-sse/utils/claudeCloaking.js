@@ -26,8 +26,23 @@ function deriveUuid(seed) {
 function generateFakeUserID(sessionId, apiKey) {
   const deviceId = apiKey ? createHash("sha256").update(`device:${apiKey}`).digest("hex") : randomBytes(32).toString("hex");
   const accountUuid = apiKey ? deriveUuid(`account:${apiKey}`) : randomUUID();
-  const sessionUuid = sessionId || randomUUID();
+  const cleanSessionId = typeof sessionId === "string" ? sessionId.replace(/^claude:/i, "").trim() : null;
+  const sessionUuid = cleanSessionId || randomUUID();
   return `{"device_id":"${deviceId}","account_uuid":"${accountUuid}","session_id":"${sessionUuid}"}`;
+}
+
+export function extractClaudeSessionIdFromUserId(userId) {
+  if (typeof userId !== "string" || !userId) return null;
+  if (userId[0] === "{") {
+    try {
+      const sid = JSON.parse(userId)?.session_id;
+      return typeof sid === "string" && sid ? sid.replace(/^claude:/i, "").trim() || null : null;
+    } catch {
+      return null;
+    }
+  }
+  const clean = userId.replace(/^claude:/i, "").trim();
+  return clean || null;
 }
 
 /**
@@ -98,6 +113,17 @@ export function cloakClaudeTools(body) {
   };
 }
 
+// Strip a trailing CLAUDE_TOOL_SUFFIX from a cloaked name as a last-resort
+// fallback when the name isn't in toolNameMap (e.g. map lost across a retry/
+// reconnect). Never strips decoy names — those are meant to reach the client
+// unresolved so it can see "tool unavailable" instead of silently no-oping.
+function stripCloakSuffix(name) {
+  if (typeof name !== "string" || !name.endsWith(CLAUDE_TOOL_SUFFIX)) return null;
+  if (CC_DEFAULT_TOOLS.has(name)) return null;
+  const original = name.slice(0, -CLAUDE_TOOL_SUFFIX.length);
+  return original.length > 0 ? original : null;
+}
+
 /**
  * Reverse cloakClaudeTools() on any Claude-format node headed back to the client.
  *
@@ -113,13 +139,16 @@ export function cloakClaudeTools(body) {
  *   "I can't use the tool 'exec_ide' here because it isn't available.
  *    I need to stop retrying it and answer without that tool."
  *
+ * Falls back to stripping CLAUDE_TOOL_SUFFIX for unknown names so a retry
+ * that lost the toolNameMap doesn't forward "<tool>_ide" to the client.
+ *
  * @param {*} node - Any JSON-serializable value (object, array, primitive).
  * @param {Map<string,string>|null} toolNameMap - cloaked → original name.
  * @returns {*} The node with tool_use names restored. Returns the same
  *   reference if nothing changed (structural sharing, GC-friendly).
  */
 export function decloakToolNames(node, toolNameMap) {
-  if (!toolNameMap?.size || !node || typeof node !== "object") return node;
+  if (!node || typeof node !== "object") return node;
 
   if (Array.isArray(node)) {
     let changed = false;
@@ -132,10 +161,10 @@ export function decloakToolNames(node, toolNameMap) {
   }
 
   if (node.type === "tool_use" && typeof node.name === "string") {
-    const original = toolNameMap.get(node.name);
-    if (original && original !== node.name) {
-      return { ...node, name: original };
-    }
+    const mapped = toolNameMap?.get?.(node.name);
+    if (mapped && mapped !== node.name) return { ...node, name: mapped };
+    const fallback = stripCloakSuffix(node.name);
+    if (fallback) return { ...node, name: fallback };
   }
 
   let changed = false;
@@ -158,19 +187,21 @@ export function decloakToolNames(node, toolNameMap) {
  * name appears exactly once per call — on the content_block_start event of
  * a tool_use block; argument deltas carry no name.
  *
- * Unknown names (e.g. a CC decoy tool the model called anyway) pass through
- * unchanged, matching the non-streaming decloak behavior.
+ * Falls back to stripping the literal CLAUDE_TOOL_SUFFIX when the name isn't
+ * in toolNameMap (map lost across a retry/reconnect), matching the
+ * non-streaming decloak behavior. Decoy tool names (real CC tool names) and
+ * anything else pass through unchanged.
  *
  * @param {object|null} chunk - Parsed SSE event (may be null on stream flush)
  * @param {Map|null} toolNameMap - Suffixed → original name map from cloakClaudeTools()
  * @returns {object|null} The chunk, with the tool_use name restored when cloaked
  */
 export function decloakStreamChunk(chunk, toolNameMap) {
-  if (!toolNameMap?.size || !chunk || typeof chunk !== "object") return chunk;
+  if (!chunk || typeof chunk !== "object") return chunk;
   if (chunk.type !== "content_block_start") return chunk;
   const block = chunk.content_block;
   if (block?.type !== "tool_use" || typeof block.name !== "string") return chunk;
-  const original = toolNameMap.get(block.name);
+  const original = toolNameMap?.get(block.name) || stripCloakSuffix(block.name);
   if (!original) return chunk;
   return { ...chunk, content_block: { ...block, name: original } };
 }

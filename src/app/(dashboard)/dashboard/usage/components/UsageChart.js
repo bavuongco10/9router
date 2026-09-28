@@ -52,6 +52,7 @@ export default function UsageChart({ period = "7d" }) {
   const chartData = isGrouped ? data.groups : { all: data };
   const hasData = isGrouped ? Object.keys(data.groups || {}).length > 0 : data.some((d) => d.tokens > 0 || d.cost > 0 || d.cachedTokens > 0);
 
+
   return (
     <Card className="flex min-w-0 flex-col gap-3 p-3 sm:p-4">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">

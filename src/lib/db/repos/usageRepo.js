@@ -5,8 +5,9 @@ import { getMeta, setMeta } from "../helpers/metaStore.js";
 
 function maskApiKey(key) {
   if (!key || typeof key !== "string") return null;
-  if (key.length <= 8) return key.charAt(0) + "***";
-  return key.slice(0, 8) + "***";
+  if (key.length <= 12) return key.charAt(0) + "***";
+  // Keep the tail: keys sharing a machine-id prefix (team keys) must not collide.
+  return key.slice(0, 8) + "***" + key.slice(-4);
 }
 
 const PENDING_TIMEOUT_MS = 60 * 1000;
@@ -359,12 +360,12 @@ export async function getUsageHistory(filter = {}) {
 
 function loadDaysInRange(adapter, maxDays) {
   if (maxDays == null) {
-    return adapter.all(`SELECT dateKey, data FROM usageDaily`);
+    return adapter.all(`SELECT dateKey, data FROM usageDaily ORDER BY dateKey ASC`);
   }
   const today = new Date();
   const cutoff = new Date(today.getFullYear(), today.getMonth(), today.getDate() - maxDays + 1);
   const cutoffKey = `${cutoff.getFullYear()}-${String(cutoff.getMonth() + 1).padStart(2, "0")}-${String(cutoff.getDate()).padStart(2, "0")}`;
-  return adapter.all(`SELECT dateKey, data FROM usageDaily WHERE dateKey >= ?`, [cutoffKey]);
+  return adapter.all(`SELECT dateKey, data FROM usageDaily WHERE dateKey >= ? ORDER BY dateKey ASC`, [cutoffKey]);
 }
 
 export async function getUsageStats(period = "all") {
@@ -563,8 +564,15 @@ export async function getUsageStats(period = "all") {
       }
     }
 
-    // Overlay precise lastUsed timestamps from history
-    const overlayCutoff = maxDays ? Date.now() - maxDays * 86400000 : 0;
+    // Overlay precise lastUsed timestamps from history.
+    // ponytail: overlay scans only a recent window; entries older than that keep
+    // day-level lastUsed from usageDaily. Upgrade to a materialized per-key
+    // MAX(timestamp) table if exact old timestamps ever matter.
+    const OVERLAY_WINDOW_MS = 2 * 86400000;
+    const overlayCutoff = Math.max(
+      maxDays ? Date.now() - maxDays * 86400000 : 0,
+      Date.now() - OVERLAY_WINDOW_MS
+    );
     const histRows = db.all(
       `SELECT timestamp, provider, model, connectionId, apiKey, endpoint FROM usageHistory WHERE timestamp >= ?`,
       [new Date(overlayCutoff).toISOString()]
@@ -653,7 +661,9 @@ export async function getUsageStats(period = "all") {
         const keyInfo = apiKeyMap[r.apiKey];
         const keyName = keyInfo?.name || r.apiKey.slice(0, 8) + "...";
         const apiKeyMasked = maskApiKey(r.apiKey);
-        const akKey = `${apiKeyMasked}|${r.model}|${r.provider || "unknown"}`;
+        // Key by the FULL api key (same as the daily rollup + lastUsed overlay)
+        // — masking here collided all keys sharing a prefix into one bucket.
+        const akKey = `${r.apiKey}|${r.model}|${r.provider || "unknown"}`;
         if (!stats.byApiKey[akKey]) {
           stats.byApiKey[akKey] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, rawModel: r.model, provider: providerDisplayName, apiKeyMasked, keyName, apiKeyKey: apiKeyMasked, lastUsed: r.timestamp };
         }
@@ -765,7 +775,7 @@ export async function getChartData(period = "7d", filterBy = "all") {
     );
 
     if (!isGrouped) {
-      const buckets = Array.from({ length: bucketCount }, (_, i) => ({ label: labelFn(startTime + i * bucketMs), tokens: 0, cachedTokens: 0, promptTokens: 0, cacheHitRatio: 0, cost: 0 }));
+      const buckets = Array.from({ length: bucketCount }, (_, i) => ({ label: labelFn(startTime + i * bucketMs), tokens: 0, cachedTokens: 0, promptTokens: 0, cacheHitRatio: 0, cost: 0, requests: 0 }));
       for (const r of rows) {
         const t = new Date(r.timestamp).getTime();
         if (t < startTime || t >= endTime) continue;
@@ -776,6 +786,7 @@ export async function getChartData(period = "7d", filterBy = "all") {
           const parsedTokens = parseJson(r.tokens, {}) || {};
           buckets[idx].cachedTokens += parsedTokens.cache_read_input_tokens || parsedTokens.cached_tokens || 0;
           buckets[idx].cost += r.cost || 0;
+          buckets[idx].requests += 1;
         }
       }
       for (const b of buckets) b.cacheHitRatio = b.promptTokens > 0 ? b.cachedTokens / b.promptTokens : 0;
@@ -790,13 +801,14 @@ export async function getChartData(period = "7d", filterBy = "all") {
       const idx = Math.floor((t - startTime) / bucketMs);
       if (idx < 0 || idx >= bucketCount) continue;
       const gk = r[filterCol] || "unknown";
-      if (!groups[gk]) groups[gk] = Array.from({ length: bucketCount }, (_, i) => ({ label: labelFn(startTime + i * bucketMs), tokens: 0, cachedTokens: 0, promptTokens: 0, cacheHitRatio: 0, cost: 0 }));
+      if (!groups[gk]) groups[gk] = Array.from({ length: bucketCount }, (_, i) => ({ label: labelFn(startTime + i * bucketMs), tokens: 0, cachedTokens: 0, promptTokens: 0, cacheHitRatio: 0, cost: 0, requests: 0 }));
       const g = groups[gk][idx];
       g.tokens += (r.promptTokens || 0) + (r.completionTokens || 0);
       g.promptTokens += (r.promptTokens || 0);
       const parsedTokens = parseJson(r.tokens, {}) || {};
       g.cachedTokens += parsedTokens.cache_read_input_tokens || parsedTokens.cached_tokens || 0;
       g.cost += r.cost || 0;
+      g.requests += 1;
     }
     for (const group of Object.values(groups)) {
       for (const b of group) b.cacheHitRatio = b.promptTokens > 0 ? b.cachedTokens / b.promptTokens : 0;
@@ -817,7 +829,7 @@ export async function getChartData(period = "7d", filterBy = "all") {
     );
 
     if (!isGrouped) {
-      const buckets = Array.from({ length: bucketCount }, (_, i) => ({ label: labelFn(startTime + i * bucketMs), tokens: 0, cachedTokens: 0, promptTokens: 0, cacheHitRatio: 0, cost: 0 }));
+      const buckets = Array.from({ length: bucketCount }, (_, i) => ({ label: labelFn(startTime + i * bucketMs), tokens: 0, cachedTokens: 0, promptTokens: 0, cacheHitRatio: 0, cost: 0, requests: 0 }));
       for (const r of rows) {
         const t = new Date(r.timestamp).getTime();
         if (t < startTime || t > now) continue;
@@ -827,6 +839,7 @@ export async function getChartData(period = "7d", filterBy = "all") {
         const parsedTokens = parseJson(r.tokens, {}) || {};
         buckets[idx].cachedTokens += parsedTokens.cache_read_input_tokens || parsedTokens.cached_tokens || 0;
         buckets[idx].cost += r.cost || 0;
+        buckets[idx].requests += 1;
       }
       for (const b of buckets) b.cacheHitRatio = b.promptTokens > 0 ? b.cachedTokens / b.promptTokens : 0;
       return buckets;
@@ -839,13 +852,14 @@ export async function getChartData(period = "7d", filterBy = "all") {
       if (t < startTime || t > now) continue;
       const idx = Math.min(Math.floor((t - startTime) / bucketMs), bucketCount - 1);
       const gk = r[filterCol] || "unknown";
-      if (!groups[gk]) groups[gk] = Array.from({ length: bucketCount }, (_, i) => ({ label: labelFn(startTime + i * bucketMs), tokens: 0, cachedTokens: 0, promptTokens: 0, cacheHitRatio: 0, cost: 0 }));
+      if (!groups[gk]) groups[gk] = Array.from({ length: bucketCount }, (_, i) => ({ label: labelFn(startTime + i * bucketMs), tokens: 0, cachedTokens: 0, promptTokens: 0, cacheHitRatio: 0, cost: 0, requests: 0 }));
       const g = groups[gk][idx];
       g.tokens += (r.promptTokens || 0) + (r.completionTokens || 0);
       g.promptTokens += (r.promptTokens || 0);
       const parsedTokens = parseJson(r.tokens, {}) || {};
       g.cachedTokens += parsedTokens.cache_read_input_tokens || parsedTokens.cached_tokens || 0;
       g.cost += r.cost || 0;
+      g.requests += 1;
     }
     for (const group of Object.values(groups)) {
       for (const b of group) b.cacheHitRatio = b.promptTokens > 0 ? b.cachedTokens / b.promptTokens : 0;
@@ -853,10 +867,41 @@ export async function getChartData(period = "7d", filterBy = "all") {
     return { grouped: true, filterBy, groups };
   }
 
+  const labelFn = (d) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+
+  if (period === "all") {
+    const dayRows = loadDaysInRange(db, null);
+    if (!dayRows.length) return [];
+    const dayMap = {};
+    for (const r of dayRows) dayMap[r.dateKey] = parseJson(r.data, {});
+
+    const earliest = new Date(dayRows[0].dateKey + "T00:00:00");
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const diffDays = Math.max(1, Math.round((today - earliest) / 86400000) + 1);
+
+    return Array.from({ length: diffDays }, (_, i) => {
+      const d = new Date(earliest);
+      d.setDate(d.getDate() + i);
+      const dateKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      const dayData = dayMap[dateKey];
+      const promptTokens = dayData ? (dayData.promptTokens || 0) : 0;
+      const cachedTokens = dayData ? (dayData.cachedTokens ?? dayData.cacheReadTokens ?? 0) : 0;
+      return {
+        label: labelFn(d),
+        tokens: dayData ? (dayData.promptTokens || 0) + (dayData.completionTokens || 0) : 0,
+        cachedTokens,
+        promptTokens,
+        cacheHitRatio: promptTokens > 0 ? cachedTokens / promptTokens : 0,
+        cost: dayData ? (dayData.cost || 0) : 0,
+        requests: dayData ? (dayData.requests || 0) : 0,
+      };
+    });
+  }
+
   // 7d / 30d / 60d
   const bucketCount = period === "7d" ? 7 : period === "30d" ? 30 : 60;
   const today = new Date();
-  const labelFn = (d) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 
   if (!isGrouped) {
     const dayRows = loadDaysInRange(db, bucketCount);
@@ -877,6 +922,7 @@ export async function getChartData(period = "7d", filterBy = "all") {
         promptTokens,
         cacheHitRatio: promptTokens > 0 ? cachedTokens / promptTokens : 0,
         cost: dayData ? (dayData.cost || 0) : 0,
+        requests: dayData ? (dayData.requests || 0) : 0,
       };
     });
   }
@@ -903,7 +949,7 @@ export async function getChartData(period = "7d", filterBy = "all") {
     if (!groups2[gk]) groups2[gk] = Array.from({ length: bucketCount }, (_, i) => {
       const d = new Date(today);
       d.setDate(d.getDate() - (bucketCount - 1 - i));
-      return { label: labelFn(d), tokens: 0, cachedTokens: 0, promptTokens: 0, cacheHitRatio: 0, cost: 0 };
+      return { label: labelFn(d), tokens: 0, cachedTokens: 0, promptTokens: 0, cacheHitRatio: 0, cost: 0, requests: 0 };
     });
     const g = groups2[gk][idx];
     g.tokens += (r.promptTokens || 0) + (r.completionTokens || 0);
@@ -911,6 +957,7 @@ export async function getChartData(period = "7d", filterBy = "all") {
     const parsedTokens = parseJson(r.tokens, {}) || {};
     g.cachedTokens += parsedTokens.cache_read_input_tokens || parsedTokens.cached_tokens || 0;
     g.cost += r.cost || 0;
+    g.requests += 1;
   }
   for (const group of Object.values(groups2)) {
     for (const b of group) b.cacheHitRatio = b.promptTokens > 0 ? b.cachedTokens / b.promptTokens : 0;
