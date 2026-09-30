@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { QUOTA_SHARE_URL_RE } from "open-sse/services/usage.js";
 import {
   getProviderConnectionById,
   getProxyPoolById,
@@ -103,6 +104,11 @@ export async function PUT(request, { params }) {
       allowedModels,
       providerSpecificData
     } = body;
+
+    const quotaShareUrl = providerSpecificData?.quotaShareUrl;
+    if (quotaShareUrl && !QUOTA_SHARE_URL_RE.test(quotaShareUrl)) {
+      return NextResponse.json({ error: "Quota tracker link must look like https://host/share/c/<token>" }, { status: 400 });
+    }
 
     const existing = await getProviderConnectionById(id);
     if (!existing) {

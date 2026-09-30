@@ -17,7 +17,7 @@ const SAFE_PSD_FIELDS = [
   "connectionProxyEnabled", "connectionProxyUrl", "connectionNoProxy",
   "githubLogin", "githubName", "githubEmail", "githubUserId",
   "username", "firstName", "lastName", "authMethod", "authKind",
-  "profileArn",
+  "profileArn", "quotaShareUrl",
 ];
 
 const DEFAULT_PAGE_SIZE = 20;
@@ -44,6 +44,7 @@ function sanitize(c) {
 }
 
 function isUsageEligible(connection) {
+  if (connection.providerSpecificData?.quotaShareUrl) return true;
   return USAGE_SUPPORTED_PROVIDERS.includes(connection.provider) && (
     connection.authType === "oauth" || USAGE_APIKEY_PROVIDERS.includes(connection.provider)
   );

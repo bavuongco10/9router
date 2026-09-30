@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { QUOTA_SHARE_URL_RE } from "open-sse/services/usage.js";
 import {
   getProviderConnections,
   createProviderConnection,
@@ -161,8 +162,14 @@ export async function POST(request) {
       };
     }
 
+    const quotaShareUrl = typeof body.quotaShareUrl === "string" ? body.quotaShareUrl.trim() : "";
+    if (quotaShareUrl && !QUOTA_SHARE_URL_RE.test(quotaShareUrl)) {
+      return NextResponse.json({ error: "Quota tracker link must look like https://host/share/c/<token>" }, { status: 400 });
+    }
+
     const mergedProviderSpecificData = {
       ...(providerSpecificData || {}),
+      ...(quotaShareUrl ? { quotaShareUrl } : {}),
       connectionProxyEnabled: proxyConfig.connectionProxyEnabled,
       connectionProxyUrl: proxyConfig.connectionProxyUrl,
       connectionNoProxy: proxyConfig.connectionNoProxy,

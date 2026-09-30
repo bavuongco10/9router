@@ -30,6 +30,7 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
     priority: 1,
     proxyPoolId: NONE_PROXY_POOL_VALUE,
     ollamaHostUrl: "",
+    quotaShareUrl: "",
   });
   const [azureData, setAzureData] = useState({
     azureEndpoint: "",
@@ -126,7 +127,8 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
         priority: formData.priority,
         proxyPoolId: formData.proxyPoolId === NONE_PROXY_POOL_VALUE ? null : formData.proxyPoolId,
         testStatus: isValid ? "active" : "unknown",
-        providerSpecificData: buildProviderSpecificData()
+        providerSpecificData: buildProviderSpecificData(),
+        ...(isCompatible && formData.quotaShareUrl.trim() ? { quotaShareUrl: formData.quotaShareUrl.trim() } : {}),
       });
     } finally {
       setSaving(false);
@@ -298,6 +300,15 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
             value={formData.defaultModel}
             onChange={(e) => setFormData({ ...formData, defaultModel: e.target.value })}
             placeholder={isAnthropic ? "claude-3-5-sonnet-latest" : "gpt-4o-mini"}
+          />
+        )}
+        {isCompatible && (
+          <Input
+            label="Quota Tracker Link (optional)"
+            type="url"
+            value={formData.quotaShareUrl}
+            onChange={(e) => setFormData({ ...formData, quotaShareUrl: e.target.value })}
+            placeholder="https://host/share/c/<token>"
           />
         )}
         {isOllamaLocal && (

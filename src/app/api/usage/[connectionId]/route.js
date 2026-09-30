@@ -139,7 +139,8 @@ export async function GET(request, { params }) {
     const isApikeyAuth =
       connection.authType === "apikey" || connection.authType === "api_key";
     const isApikeyEligible =
-      isApikeyAuth && USAGE_APIKEY_PROVIDERS.includes(connection.provider);
+      isApikeyAuth && (USAGE_APIKEY_PROVIDERS.includes(connection.provider) ||
+        !!connection.providerSpecificData?.quotaShareUrl);
 
     if (!isOAuth && !isApikeyEligible) {
       return Response.json({ message: "Usage not available for this connection" });

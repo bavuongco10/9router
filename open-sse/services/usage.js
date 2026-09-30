@@ -22,6 +22,8 @@ import { getXiaomiMimoUsage } from "./usage/xiaomi-mimo.js";
 import { resolveQoderCredentials } from "./qoderModels.js";
 import { getGlmUsage } from "./usage/glm.js";
 import { getCommandCodeUsage } from "./usage/commandcode.js";
+import { proxyAwareFetch } from "../utils/proxyFetch.js";
+import { parseResetTime } from "./usage/shared.js";
 import {
   getIflowUsage,
   getOllamaUsage,
@@ -79,6 +81,10 @@ export async function getUsageForProvider(connection, proxyOptions = null, optio
     ...(projectId ? { projectId } : {}),
   };
 
+  if (providerSpecificData?.quotaShareUrl) {
+    return getShareLinkUsage(providerSpecificData.quotaShareUrl, proxyOptions);
+  }
+
   const handler = USAGE_HANDLERS[provider];
   if (!handler) return { message: `Usage API not implemented for ${provider}` };
   return await handler({
@@ -90,4 +96,30 @@ export async function getUsageForProvider(connection, proxyOptions = null, optio
     proxyOptions,
     force: options.force === true,
   });
+}
+
+// Custom providers (e.g. UQ Router) that publish a quota share link
+// `<host>/share/c/<token>`; its page reads JSON from `<host>/api/public/connections/<token>`
+// → { plan, tierLabel, windows: [{ name, pct (% used), resetAt, unlimited }] }.
+// ponytail: only this share-link shape is supported; add a per-format adapter if another host differs.
+export const QUOTA_SHARE_URL_RE = /^https?:\/\/.+\/share\/c\/[^/]+$/;
+
+async function getShareLinkUsage(shareUrl, proxyOptions) {
+  const apiUrl = shareUrl.replace("/share/c/", "/api/public/connections/");
+  const res = await proxyAwareFetch(apiUrl, { cache: "no-store" }, proxyOptions);
+  if (!res.ok) return { message: `Quota share link returned ${res.status}` };
+  const data = await res.json();
+  const quotas = {};
+  for (const w of data.windows || []) {
+    const remaining = Math.max(0, 100 - (w.pct ?? 0));
+    quotas[w.name] = {
+      used: w.pct ?? 0,
+      total: 100,
+      remaining,
+      remainingPercentage: remaining,
+      resetAt: parseResetTime(w.resetAt),
+      unlimited: !!w.unlimited,
+    };
+  }
+  return { plan: data.plan || null, tier: data.tierLabel || null, quotas };
 }

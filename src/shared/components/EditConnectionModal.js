@@ -16,6 +16,7 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
     priority: 1,
     weight: 1,
     apiKey: "",
+    quotaShareUrl: "",
   });
   const [azureData, setAzureData] = useState({
     azureEndpoint: "",
@@ -42,6 +43,7 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
       priority: connection.priority || 1,
       weight: connection.weight ?? 1,
       apiKey: "",
+      quotaShareUrl: connection.providerSpecificData?.quotaShareUrl || "",
     });
     if (connection.provider === "azure" && connection.providerSpecificData) {
       setAzureData({
@@ -203,6 +205,9 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
       if (isCloudflareAi) {
         updates.providerSpecificData = { accountId: cloudflareData.accountId };
       }
+      if (isCompatible) {
+        updates.providerSpecificData = { quotaShareUrl: formData.quotaShareUrl.trim() };
+      }
       // Persist updated region for region-aware providers
       if (providerRegions && region) {
         updates.providerSpecificData = buildRegionSpecificData();
@@ -317,6 +322,16 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
             value={region}
             onChange={(e) => setRegion(e.target.value)}
             options={providerRegions.map((r) => ({ value: r.id, label: r.label }))}
+          />
+        )}
+
+        {isCompatible && (
+          <Input
+            label="Quota Tracker Link (optional)"
+            type="url"
+            value={formData.quotaShareUrl}
+            onChange={(e) => setFormData({ ...formData, quotaShareUrl: e.target.value })}
+            placeholder="https://host/share/c/<token>"
           />
         )}
 
