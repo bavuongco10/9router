@@ -4,8 +4,9 @@
 import m001 from "./001-initial.js";
 import m002 from "./002-detail-summary-cols.js";
 import m003 from "./003-rules-table.js";
+import m004 from "./004-apikey-access-cols.js";
 
-export const MIGRATIONS = [m001, m002, m003].sort((a, b) => a.version - b.version);
+export const MIGRATIONS = [m001, m002, m003, m004].sort((a, b) => a.version - b.version);
 
 export function latestVersion() {
   return MIGRATIONS.length ? MIGRATIONS[MIGRATIONS.length - 1].version : 0;
