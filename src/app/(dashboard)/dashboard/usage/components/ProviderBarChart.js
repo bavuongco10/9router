@@ -82,8 +82,11 @@ export default function ProviderBarChart({ byProvider }) {
               width={44}
             />
             <Tooltip
+              cursor={{ fill: "var(--color-border)", fillOpacity: 0.4 }}
+              labelStyle={{ color: "var(--color-text)" }}
+              itemStyle={{ color: "var(--color-text)" }}
               contentStyle={{
-                backgroundColor: "var(--color-bg)",
+                backgroundColor: "var(--color-surface)",
                 border: "1px solid var(--color-border)",
                 borderRadius: "8px",
                 fontSize: "12px",
