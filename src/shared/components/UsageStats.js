@@ -107,13 +107,13 @@ function RecentRequests({ requests = [] }) {
       case "status":
         return <span className={`block w-1.5 h-1.5 rounded-full ${ok ? "bg-success" : "bg-error"}`} />;
       case "model":
-        return <span className="font-mono truncate max-w-[120px] inline-block align-middle" title={r.model}>{r.model}</span>;
+        return <span className="font-mono truncate [direction:rtl] text-left max-w-[120px] inline-block align-middle" title={r.model}><bdi>{r.model}</bdi></span>;
       case "provider":
-        return <span className="text-text-muted truncate max-w-[100px] inline-block align-middle" title={r.provider || ""}>{r.provider || "—"}</span>;
+        return <span className="text-text-muted truncate [direction:rtl] text-left max-w-[100px] inline-block align-middle" title={r.provider || ""}><bdi>{r.provider || "—"}</bdi></span>;
       case "account":
-        return <span className="text-text-muted truncate max-w-[140px] inline-block align-middle" title={r.account || ""}>{r.account || "—"}</span>;
+        return <span className="text-text-muted truncate [direction:rtl] text-left max-w-[140px] inline-block align-middle" title={r.account || ""}><bdi>{r.account || "—"}</bdi></span>;
       case "keyName":
-        return <span className="text-text-muted truncate max-w-[120px] inline-block align-middle" title={r.keyName || ""}>{r.keyName || "—"}</span>;
+        return <span className="text-text-muted truncate [direction:rtl] text-left max-w-[120px] inline-block align-middle" title={r.keyName || ""}><bdi>{r.keyName || "—"}</bdi></span>;
       case "tokens":
         return (
           <span className="whitespace-nowrap">
@@ -123,7 +123,7 @@ function RecentRequests({ requests = [] }) {
           </span>
         );
       case "endpoint":
-        return <span className="text-text-muted font-mono truncate max-w-[160px] inline-block align-middle" title={r.endpoint || ""}>{r.endpoint || "—"}</span>;
+        return <span className="text-text-muted font-mono truncate [direction:rtl] text-left max-w-[160px] inline-block align-middle" title={r.endpoint || ""}><bdi>{r.endpoint || "—"}</bdi></span>;
       case "when":
         return <span className="text-text-muted whitespace-nowrap"><TimeAgo timestamp={r.timestamp} /></span>;
       default:
