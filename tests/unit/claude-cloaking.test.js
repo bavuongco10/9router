@@ -38,6 +38,8 @@ it("advertises a Claude Code version accepted by Fable 5.1", () => {
 const { createPassthroughStreamWithLogger, createSSETransformStreamWithLogger } = await import("open-sse/utils/stream.js");
 const { FORMATS } = await import("open-sse/translator/formats.js");
 const { decloakToolNames } = await import("open-sse/utils/claudeCloaking.js");
+const { decloakStreamChunk } = await import("open-sse/utils/claudeCloaking.js");
+const { CLAUDE_TOOL_SUFFIX } = await import("open-sse/config/appConstants.js");
 
 async function runStream(stream, inputs) {
   const encoder = new TextEncoder();
