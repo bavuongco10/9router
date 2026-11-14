@@ -152,7 +152,7 @@ async function flushToDatabase() {
       // recorded as lightweight summary rows (above, for analytics) but don't
       // need the heavy payload, which would just grow the logs unbounded.
       for (const p of prepared) {
-        if (p.status === "success") continue;
+        if (p.status === "success" || process.env.ENABLE_PAYLOAD_LOGS !== "true") continue;
         writePayload(p.id, p.timestamp, p.fullDetail).catch(() => {});
       }
     }

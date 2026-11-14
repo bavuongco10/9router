@@ -2,7 +2,7 @@
 const isNode = typeof process !== "undefined" && process.versions?.node && typeof window === "undefined";
 
 // Check if logging is enabled via environment variable (default: false)
-const LOGGING_ENABLED = typeof process !== "undefined" && process.env?.ENABLE_REQUEST_LOGS === 'true';
+const LOGGING_ENABLED = typeof process !== "undefined" && process.env?.ENABLE_PAYLOAD_LOGS === 'true'; // ponytail: full request/response dumps, decoupled from ENABLE_REQUEST_LOGS (chart rows) so they stay off by default
 
 let fs = null;
 let path = null;
