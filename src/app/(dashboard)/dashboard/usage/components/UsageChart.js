@@ -12,14 +12,10 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import Card from "@/shared/components/Card";
-
-const fmtTokens = (n) => {
-  if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
-  return String(n || 0);
-};
+import { fmtCompactTokens } from "./tokenDisplay";
 
 const fmtCost = (n) => `$${(n || 0).toFixed(4)}`;
+const fmtTokens = fmtCompactTokens;
 const fmtPct = (n) => `${(n * 100).toFixed(1)}%`;
 const GROUP_COLORS = ["#6366f1", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4", "#f97316", "#84cc16"];
 
